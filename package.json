@@ -1,7 +1,7 @@
 {
   "name": "opendsh",
   "displayName": "Open DSH",
-  "description": "Open the DeepSeek Harness Web UI inside VS Code, with one-command start/stop for the current workspace.",
+  "description": "Open the DeepSeek Harness Web UI inside VS Code, auto-starting the server for the current workspace.",
   "version": "0.0.1",
   "publisher": "dsh",
   "license": "MIT",
@@ -25,7 +25,6 @@
   "activationEvents": [
     "onUri",
     "onCommand:opendsh.open",
-    "onCommand:opendsh.start",
     "onCommand:opendsh.stop"
   ],
   "main": "./extension.js",
@@ -40,13 +39,8 @@
         "category": "DSH"
       },
       {
-        "command": "opendsh.start",
-        "title": "Start",
-        "category": "DSH"
-      },
-      {
         "command": "opendsh.stop",
-        "title": "Stop",
+        "title": "Stop DSH",
         "category": "DSH"
       }
     ],

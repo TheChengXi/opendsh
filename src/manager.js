@@ -1,13 +1,13 @@
 /**
  * @intent
- * 生命周期编排：open/start/stop。open 与 start 语义相同——端口已监听则直接打开，未监听则自动启动后打开；
+ * 生命周期编排：open/stop。open 端口已监听则直接打开，未监听则自动启动后打开——启动判定封装在代码层，用户无需显式 start；
  * 持有当前子进程引用，屏蔽 VS Code 交互细节。
  *
  * 边界：端口未监听且无工作区时报错返回不抛异常；spawn 失败报错返回；stop 无记录实例时仅提示不抛异常；
  * 打开优先 simpleBrowser.api.open、失败回退 openExternal。
  *
  * 验收条件：
- * - open/start 端口未监听时 spawn 后 open，已监听时跳过 spawn 直接 open
+ * - open 端口未监听时 spawn 后 open，已监听时跳过 spawn 直接 open
  * - 端口未监听且无工作区时报错且不 spawn
  * - 端口已监听时 open 无需工作区也能直接打开
  * - stop 无 child 时提示且不抛异常
@@ -42,7 +42,7 @@ function createManager(deps) {
     }
   }
 
-  async function ensureRunning() {
+  async function open() {
     const config = detect.resolveConfig(readSettings());
     if (await proc.isPortInUse(config.host, config.port)) {
       await openBrowser(config);
@@ -85,8 +85,7 @@ function createManager(deps) {
   }
 
   return {
-    open: ensureRunning,
-    start: ensureRunning,
+    open,
     stop,
     getChild: () => child,
   };

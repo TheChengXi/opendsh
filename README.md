@@ -6,12 +6,13 @@ and can start / stop the `dsh web` server for the current workspace.
 
 ## Features
 
-- `DSH: Open DSH` — open the Web UI at the configured host/port.
-- `DSH: Start` — ensure the server is running for the current workspace, then open it.
-  It auto-detects the workspace folder, its `.dsh/*.patch.yml` files, and the `dsh`
-  executable; if the port is already listening it just opens without restarting.
-- `DSH: Stop` — stop the server this extension started.
-- Deep link `vscode://dsh.opendsh/open` opens the UI from outside VS Code.
+- `DSH: Open DSH` — open the Web UI; if the server isn't running for the current
+  workspace, it auto-starts it first (auto-detecting the workspace folder, its
+  `.dsh/*.patch.yml` files, and the `dsh` executable). If the port is already
+  listening, it just opens.
+- `DSH: Stop DSH` — stop the server this extension started.
+- Deep link `vscode://dsh.opendsh/open` opens the UI from outside VS Code (same
+  auto-start behavior).
 
 ## Prerequisites
 
