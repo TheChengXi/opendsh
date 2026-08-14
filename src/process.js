@@ -6,7 +6,7 @@
  * 走 .cmd shim，POSIX 直接 spawn；kill 在 Windows 用 taskkill /T /F 树杀，POSIX 用 child.kill。
  *
  * 验收条件：
- * - buildDshArgs 顺序 = [prefix..., web, --host, host, --port, port, --patch p1 ...]
+ * - buildDshArgs 顺序 = [prefix..., web, --patch p..., --host host, --port port]（--patch 必须在 --host/--port 前，否则 dsh 报 unknown option）
  * - isPortInUse 对真实监听端口返回 true，空闲端口返回 false
  * - waitForPort 端口在超时内就绪返回 true，超时返回 false
  * - spawnDsh 在 win 走 cmd.exe /d /s /c、非 win 直接 spawn，且传 detached/windowsHide/stdio:ignore
@@ -24,8 +24,9 @@ function buildDshArgs(resolved, opts) {
   const patches = Array.isArray(o.patches) ? o.patches : [];
   const args = [];
   if (Array.isArray(r.prefixArgs)) args.push(...r.prefixArgs);
-  args.push('web', '--host', o.host, '--port', String(o.port));
+  args.push('web');
   for (const p of patches) args.push('--patch', p);
+  args.push('--host', o.host, '--port', String(o.port));
   return args;
 }
 

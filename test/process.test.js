@@ -20,14 +20,14 @@ test('buildDshArgs builds ordered args with prefix and patches', () => {
   );
   assert.deepStrictEqual(args, [
     'web',
-    '--host',
-    '127.0.0.1',
-    '--port',
-    '3080',
     '--patch',
     'a.yml',
     '--patch',
     'b.yml',
+    '--host',
+    '127.0.0.1',
+    '--port',
+    '3080',
   ]);
 });
 
@@ -72,12 +72,12 @@ test('spawnDsh win spawns with shell true and windowsHide', () => {
   assert.strictEqual(captured.cmd, 'dsh');
   assert.deepStrictEqual(captured.args, [
     'web',
+    '--patch',
+    'C:/ws/.dsh/a.patch.yml',
     '--host',
     '127.0.0.1',
     '--port',
     '8080',
-    '--patch',
-    'C:/ws/.dsh/a.patch.yml',
   ]);
   assert.strictEqual(captured.opts.shell, true);
   assert.strictEqual(captured.opts.windowsHide, true);
