@@ -1,0 +1,75 @@
+{
+  "name": "opendsh",
+  "displayName": "Open DSH",
+  "description": "Open the DeepSeek Harness Web UI inside VS Code, with one-command start/stop for the current workspace.",
+  "version": "0.0.1",
+  "publisher": "dsh",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek",
+    "harness",
+    "web",
+    "browser"
+  ],
+  "activationEvents": [
+    "onUri",
+    "onCommand:opendsh.open",
+    "onCommand:opendsh.start",
+    "onCommand:opendsh.stop"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "opendsh.open",
+        "title": "Open DSH",
+        "category": "DSH"
+      },
+      {
+        "command": "opendsh.start",
+        "title": "Start",
+        "category": "DSH"
+      },
+      {
+        "command": "opendsh.stop",
+        "title": "Stop",
+        "category": "DSH"
+      }
+    ],
+    "configuration": {
+      "title": "DSH",
+      "properties": {
+        "opendsh.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host the DSH web server binds to."
+        },
+        "opendsh.port": {
+          "type": "number",
+          "default": 3080,
+          "description": "Port the DSH web server listens on."
+        },
+        "opendsh.dshPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the dsh executable. Empty means auto-resolve from PATH, then fall back to npx."
+        },
+        "opendsh.patchFile": {
+          "type": "string",
+          "default": "",
+          "description": "MCP patch file passed to 'dsh web'. Empty means auto-discover .dsh/*.patch.yml in the workspace."
+        }
+      }
+    }
+  }
+}
