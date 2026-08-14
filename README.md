@@ -11,7 +11,7 @@ and can start / stop the `dsh web` server for the current workspace.
   `.dsh/*.patch.yml` files, and the `dsh` executable). If the port is already
   listening, it just opens.
 - `DSH: Stop DSH` — stop the server this extension started.
-- Deep link `vscode://dsh.opendsh/open` opens the UI from outside VS Code (same
+- Deep link `vscode://TheChengXi.opendsh/open` opens the UI from outside VS Code (same
   auto-start behavior).
 
 ## Prerequisites
@@ -31,7 +31,7 @@ and can start / stop the `dsh web` server for the current workspace.
 ## Install
 
 Build a `.vsix` with `npx @vscode/vsce package`, then install it, or copy this
-folder into your extensions directory as `dsh.opendsh-0.0.1` and reload the window.
+folder into your extensions directory as `TheChengXi.opendsh-0.0.1` and reload the window.
 
 ## Test
 
@@ -39,5 +39,5 @@ folder into your extensions directory as `dsh.opendsh-0.0.1` and reload the wind
 node --test
 ```
 
-To open from a terminal: `start "" "vscode://dsh.opendsh/open"` (Windows) or
-`open "vscode://dsh.opendsh/open"` (macOS).
+To open from a terminal: `start "" "vscode://TheChengXi.opendsh/open"` (Windows) or
+`open "vscode://TheChengXi.opendsh/open"` (macOS).
