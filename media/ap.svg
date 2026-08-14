@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- 背景圆形（可选，去掉也行） -->
+  <circle cx="64" cy="64" r="60" fill="#1e3a5f"/>
+  
+  <!-- 鲸鱼身体 -->
+  <path d="M28 68 
+           C28 48, 48 32, 72 34 
+           C92 36, 108 50, 108 68 
+           C108 82, 96 92, 80 94 
+           C70 95, 60 92, 52 86 
+           C44 80, 36 78, 28 78 
+           Z" 
+        fill="#4fc3f7"/>
+  
+  <!-- 鲸鱼尾巴 -->
+  <path d="M28 72 
+           C18 68, 12 58, 14 48 
+           C16 42, 22 40, 28 44 
+           C32 52, 30 64, 28 72 Z" 
+        fill="#29b6f6"/>
+  
+  <!-- 鲸鱼肚子（浅色） -->
+  <path d="M40 78 
+           C48 86, 62 90, 78 88 
+           C90 86, 100 78, 102 68 
+           C100 72, 88 80, 72 82 
+           C56 84, 44 80, 40 78 Z" 
+        fill="#81d4fa"/>
+  
+  <!-- 眼睛 -->
+  <circle cx="88" cy="58" r="5" fill="#0d47a1"/>
+  <circle cx="89.5" cy="56.5" r="1.8" fill="#ffffff"/>
+  
+  <!-- 微笑 -->
+  <path d="M78 68 Q88 74 96 68" 
+        stroke="#0d47a1" 
+        stroke-width="2.5" 
+        fill="none" 
+        stroke-linecap="round"/>
+  
+  <!-- 小水花装饰（可选） -->
+  <path d="M96 42 Q100 36 104 42" 
+        stroke="#81d4fa" 
+        stroke-width="2.5" 
+        fill="none" 
+        stroke-linecap="round"/>
+  <path d="M100 38 Q103 32 106 38" 
+        stroke="#81d4fa" 
+        stroke-width="2" 
+        fill="none" 
+        stroke-linecap="round"/>
+</svg>

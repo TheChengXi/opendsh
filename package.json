@@ -5,22 +5,35 @@
   "version": "0.0.1",
   "publisher": "TheChengXi",
   "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#4D6BFE",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/TheChengXi/opendsh.git"
+  },
+  "homepage": "https://github.com/TheChengXi/opendsh#readme",
+  "bugs": {
+    "url": "https://github.com/TheChengXi/opendsh/issues"
   },
   "engines": {
     "vscode": "^1.70.0"
   },
   "categories": [
-    "Other"
+    "AI",
+    "Chat"
   ],
   "keywords": [
     "dsh",
     "deepseek",
     "harness",
     "web",
-    "browser"
+    "webview",
+    "launcher",
+    "agent",
+    "vscode"
   ],
   "activationEvents": [
     "onUri",
