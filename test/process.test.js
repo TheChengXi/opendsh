@@ -101,6 +101,36 @@ test('isPortInUse true on listening port, false on free port', async () => {
   assert.strictEqual(await proc.isPortInUse('127.0.0.1', freePort), false);
 });
 
+test('waitForPort resolves true when port already listening', async () => {
+  const ok = await proc.waitForPort('127.0.0.1', 3080, {
+    timeoutMs: 100,
+    intervalMs: 5,
+    probe: async () => true,
+  });
+  assert.strictEqual(ok, true);
+});
+
+test('waitForPort polls until probe becomes true', async () => {
+  let n = 0;
+  const probe = async () => ++n >= 3;
+  const ok = await proc.waitForPort('127.0.0.1', 3080, {
+    timeoutMs: 100,
+    intervalMs: 5,
+    probe,
+  });
+  assert.strictEqual(ok, true);
+  assert.strictEqual(n, 3);
+});
+
+test('waitForPort resolves false on timeout', async () => {
+  const ok = await proc.waitForPort('127.0.0.1', 3080, {
+    timeoutMs: 30,
+    intervalMs: 5,
+    probe: async () => false,
+  });
+  assert.strictEqual(ok, false);
+});
+
 test('killDsh win runs taskkill /T /F', async () => {
   let captured = null;
   const fakeExecFile = (cmd, args, cb) => {

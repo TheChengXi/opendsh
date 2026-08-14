@@ -13,7 +13,7 @@ const { createManager } = require('../src/manager');
 
 function makeHarness(opts) {
   opts = opts || {};
-  const calls = { messages: [], opened: [], external: [], spawned: null, killed: null };
+  const calls = { messages: [], opened: [], external: [], spawned: null, killed: null, waited: null };
 
   const fakeDetect = {
     resolveConfig: (s) => s,
@@ -30,6 +30,10 @@ function makeHarness(opts) {
     spawnDsh: (r, o) => {
       calls.spawned = { r, o };
       return { pid: 1, killed: false };
+    },
+    waitForPort: async (host, port) => {
+      calls.waited = { host, port };
+      return true;
     },
     killDsh: async () => {
       calls.killed = true;
@@ -70,6 +74,9 @@ test('open auto-starts when port free', async () => {
   await h.manager.open();
   assert.ok(h.calls.spawned);
   assert.strictEqual(h.calls.spawned.o.cwd, '/ws');
+  assert.ok(h.calls.waited);
+  assert.strictEqual(h.calls.waited.host, '127.0.0.1');
+  assert.strictEqual(h.calls.waited.port, 3080);
   assert.strictEqual(h.calls.opened.length, 1);
   assert.ok(h.manager.getChild());
 });
@@ -110,6 +117,20 @@ test('open shows error when port free and no workspace', async () => {
   const h = makeHarness({ folders: [] });
   await h.manager.open();
   assert.strictEqual(h.calls.spawned, null);
+  assert.strictEqual(h.calls.opened.length, 0);
+  assert.ok(h.calls.messages.some((x) => x.kind === 'error'));
+});
+
+test('open shows error when server fails to start (port timeout)', async () => {
+  const h = makeHarness({
+    process: {
+      isPortInUse: async () => false,
+      waitForPort: async () => false,
+      killDsh: async () => true,
+    },
+  });
+  await h.manager.open();
+  assert.ok(h.calls.spawned);
   assert.strictEqual(h.calls.opened.length, 0);
   assert.ok(h.calls.messages.some((x) => x.kind === 'error'));
 });
