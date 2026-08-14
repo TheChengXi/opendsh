@@ -2,7 +2,7 @@
  * @intent
  * manager.js 的 node:test 编排测试，注入假 detect/process/vscode 断言决策顺序与边界。
  *
- * 验收条件：node --test 全绿，覆盖 start 顺序、端口占用跳过 spawn、无工作区报错、stop 无 child 提示。
+ * 验收条件：node --test 全绿，覆盖 open/start 自动启动、端口占用跳过 spawn、无工作区报错、open 回退、stop 无 child 提示。
  */
 
 'use strict';
@@ -74,7 +74,15 @@ test('start spawns then opens when port free', async () => {
   assert.ok(h.manager.getChild());
 });
 
-test('start skips spawn when port in use', async () => {
+test('open auto-starts when port free', async () => {
+  const h = makeHarness();
+  await h.manager.open();
+  assert.ok(h.calls.spawned);
+  assert.strictEqual(h.calls.opened.length, 1);
+  assert.ok(h.manager.getChild());
+});
+
+test('open/start skips spawn when port in use', async () => {
   const h = makeHarness({
     process: {
       isPortInUse: async () => true,
@@ -90,7 +98,23 @@ test('start skips spawn when port in use', async () => {
   assert.strictEqual(h.manager.getChild(), null);
 });
 
-test('start shows error when no workspace', async () => {
+test('open opens without workspace when port already in use', async () => {
+  const h = makeHarness({
+    folders: [],
+    process: {
+      isPortInUse: async () => true,
+      spawnDsh: () => {
+        throw new Error('should not spawn');
+      },
+      killDsh: async () => true,
+    },
+  });
+  await h.manager.open();
+  assert.strictEqual(h.calls.spawned, null);
+  assert.strictEqual(h.calls.opened.length, 1);
+});
+
+test('start shows error when port free and no workspace', async () => {
   const h = makeHarness({ folders: [] });
   await h.manager.start();
   assert.strictEqual(h.calls.spawned, null);

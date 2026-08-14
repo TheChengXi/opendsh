@@ -1,13 +1,15 @@
 /**
  * @intent
- * 生命周期编排：start/open/stop 的决策顺序，持有当前子进程引用，屏蔽 VS Code 交互细节。
+ * 生命周期编排：open/start/stop。open 与 start 语义相同——端口已监听则直接打开，未监听则自动启动后打开；
+ * 持有当前子进程引用，屏蔽 VS Code 交互细节。
  *
- * 边界：start 无工作区时报错返回不抛异常；端口已监听则只 open 不 spawn；spawn 失败报错返回；
- * stop 无记录实例时仅提示不抛异常；open 优先 simpleBrowser.api.open、失败回退 openExternal。
+ * 边界：端口未监听且无工作区时报错返回不抛异常；spawn 失败报错返回；stop 无记录实例时仅提示不抛异常；
+ * 打开优先 simpleBrowser.api.open、失败回退 openExternal。
  *
  * 验收条件：
- * - start 顺序 = resolveConfig → resolveWorkspace → isPortInUse →(spawn)→ open
- * - 端口已占用时 start 跳过 spawn 直接 open
+ * - open/start 端口未监听时 spawn 后 open，已监听时跳过 spawn 直接 open
+ * - 端口未监听且无工作区时报错且不 spawn
+ * - 端口已监听时 open 无需工作区也能直接打开
  * - stop 无 child 时提示且不抛异常
  */
 
@@ -30,8 +32,7 @@ function createManager(deps) {
     };
   }
 
-  async function open() {
-    const config = detect.resolveConfig(readSettings());
+  async function openBrowser(config) {
     const url = detect.buildUrl(config.host, config.port);
     const uri = vscode.Uri.parse(url);
     try {
@@ -41,15 +42,15 @@ function createManager(deps) {
     }
   }
 
-  async function start() {
+  async function ensureRunning() {
     const config = detect.resolveConfig(readSettings());
+    if (await proc.isPortInUse(config.host, config.port)) {
+      await openBrowser(config);
+      return;
+    }
     const workspace = detect.resolveWorkspace(vscode.workspace.workspaceFolders);
     if (!workspace) {
       vscode.window.showErrorMessage('DSH: open a workspace folder first.');
-      return;
-    }
-    if (await proc.isPortInUse(config.host, config.port)) {
-      await open();
       return;
     }
     const patches = detect.resolvePatches(config, workspace);
@@ -66,7 +67,7 @@ function createManager(deps) {
       vscode.window.showErrorMessage('DSH: failed to start: ' + msg);
       return;
     }
-    await open();
+    await openBrowser(config);
   }
 
   async function stop() {
@@ -84,8 +85,8 @@ function createManager(deps) {
   }
 
   return {
-    open,
-    start,
+    open: ensureRunning,
+    start: ensureRunning,
     stop,
     getChild: () => child,
   };
