@@ -4,4 +4,6 @@ test/**
 **/*.test.js
 .vscode/**
 .gitignore
+docs/**
+scripts/**
 *.vsix

@@ -155,3 +155,50 @@ node --test
 
 To open from a terminal: `start "" "vscode://TheChengXi.opendsh/open"` (Windows) or
 `open "vscode://TheChengXi.opendsh/open"` (macOS).
+
+---
+
+## 已知问题与上游补丁 · Known issue & upstream patch
+
+### 问题 / Issue
+
+在 Windows 上**静默启动** `dsh web`（本扩展默认 `showWindow: false`）后，与 agent 对话时
+**每次调用 shell / subprocess 工具，任务栏都会闪现一个 node 控制台窗口**（一闪而过，快到来不及看清）。
+反复调用工具时反复弹窗。
+
+根因 **不在本扩展**：DSH（`@deepseek-ai/dsh`）在 Windows 上把每条隔离命令包装成
+`[node, .../dsh-sandbox-windows-acl/runner.js, <payload>]`，再经 `dsh-subprocess-local` 的
+`spawnSubprocess()` 用 `node:child_process.spawn` 启动，但**该 spawn 未设 `windowsHide`
+（`CREATE_NO_WINDOW`）**。由于 dsh web 本身是被本扩展静默启动（无控制台），Windows 没有可继承的控制台，
+就为每个控制台类型的子进程新建一个控制台窗口 → 闪现后随命令退出关闭。
+
+### 临时补丁 / Local patch
+
+仓库内置可重复执行的幂等补丁 `scripts/patch-dsh-windows-hide.mjs`：给 `spawnSubprocess()` 的 `spawn()`
+补一行 `windowsHide: platform === "win32"`（不改执行模型、不剥离 Windows ACL 隔离沙箱）。仅 win32 生效，
+非 win32 无副作用；stdout/stderr 本就 pipe 回收到对话，用户并不需要独立控制台。
+
+```bash
+node scripts/patch-dsh-windows-hide.mjs           # 应用补丁（幂等）
+node scripts/patch-dsh-windows-hide.mjs --check   # 只检查是否已打过
+```
+
+- 打补丁后需**重启 DSH 服务生效**（VS Code 里 `Stop DSH` 再 `Open DSH`）。
+- DSH 升级 / 重装会覆盖 `node_modules`，届时重跑一次本脚本即可。
+- 上游（`@deepseek-ai/dsh`）修复合入后，本补丁将变为 no-op，可随时移除；
+  待提给上游的 issue 内容见 `docs/dsh-windows-console-window-issue.md`。
+
+### Status
+
+On Windows, when `dsh web` runs **silently** (the extension default `showWindow: false`), every
+shell / subprocess tool call flashes a `node` console window in the taskbar while you chat with an agent.
+The root cause is **not this extension**: DSH wraps each confined command as
+`[node, .../dsh-sandbox-windows-acl/runner.js, <payload>]` and spawns it via `dsh-subprocess-local`'s
+`spawnSubprocess()` without `windowsHide` (`CREATE_NO_WINDOW`). With the server started silently (no console
+to inherit), Windows creates a fresh console window per console-type child, which flashes and closes on exit.
+
+This repo ships a rerunnable, idempotent patch `scripts/patch-dsh-windows-hide.mjs` that adds
+`windowsHide: platform === "win32"` to that `spawn()` (keeps the execution model and the Windows ACL sandbox
+intact; no-op on non-Windows). Restart DSH after applying. Re-run the script after a DSH upgrade / reinstall.
+Once upstream (`@deepseek-ai/dsh`) fixes it, the patch becomes a no-op and can be removed; see
+`docs/dsh-windows-console-window-issue.md` for the issue draft.

@@ -2,7 +2,7 @@
   "name": "opendsh",
   "displayName": "Open DSH",
   "description": "Open the DeepSeek Harness Web UI inside VS Code. One-click editor title and status bar buttons open a single reusable tab; auto-starts the dsh web server for the current workspace, with a one-command stop.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "TheChengXi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -43,7 +43,8 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "package": "vsce package"
   },
   "contributes": {
     "menus": {
