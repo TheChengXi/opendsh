@@ -1,7 +1,7 @@
 {
   "name": "opendsh",
   "displayName": "Open DSH",
-  "description": "Open the DeepSeek Harness Web UI inside VS Code. Sidebar quick-launch icon opens a single reusable tab; auto-starts the dsh web server for the current workspace, with a one-command stop.",
+  "description": "Open the DeepSeek Harness Web UI inside VS Code. A one-click editor title button opens a single reusable tab; auto-starts the dsh web server for the current workspace, with a one-command stop.",
   "version": "0.0.3",
   "publisher": "TheChengXi",
   "license": "MIT",
@@ -38,29 +38,19 @@
   "activationEvents": [
     "onUri",
     "onCommand:opendsh.open",
-    "onCommand:opendsh.stop",
-    "onView:opendsh.launch"
+    "onCommand:opendsh.stop"
   ],
   "main": "./extension.js",
   "scripts": {
     "test": "node --test"
   },
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
+    "menus": {
+      "editor/title": [
         {
-          "id": "opendsh",
-          "title": "DSH",
+          "command": "opendsh.open",
+          "group": "navigation",
           "icon": "media/dsh-activity.svg"
-        }
-      ]
-    },
-    "views": {
-      "opendsh": [
-        {
-          "type": "tree",
-          "id": "opendsh.launch",
-          "name": "DSH"
         }
       ]
     },

@@ -10,16 +10,17 @@
 <a id="中文"></a>
 # 中文
 
-**Open DSH** 是一个极简的 VS Code 扩展：活动栏提供一个 DSH 快捷图标（侧边栏「Open DSH」按钮），
-点击后在编辑器内以**单标签页**打开 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-（`dsh`）的 Web UI（重复点击只聚焦已有标签页，不会越开越多；webview 不可用时回退系统浏览器），
+**Open DSH** 是一个极简的 VS Code 扩展：编辑器标题栏（标签栏同层）提供一个大写 D 快捷按钮，
+单击直接执行 `DSH: Open DSH`，在编辑器内以**单标签页**打开
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）的 Web UI
+（重复点击只聚焦已有标签页，不会越开越多；webview 不可用时回退系统浏览器），
 并能为当前工作区自动启动 / 停止 `dsh web` 服务。
 
 
 ## 功能
 
-- **侧边栏快捷入口** —— 活动栏的 DSH 图标（大写 D）展开侧边栏面板，「Open DSH」按钮点击即打开，
-  等价于命令面板里的 `DSH: Open DSH`。
+- **标题栏快捷按钮** —— 编辑器标签栏同层右上角的大写 D 按钮，单击直接执行 `DSH: Open DSH`
+  （打开 / 聚焦唯一的 DSH 标签页），与命令面板里的命令等价。
 - `DSH: Open DSH` —— 打开 Web UI：如果当前工作区的服务没在运行，会先自动启动（自动识别工作区目录、
   `.dsh/*.patch.yml` 补丁文件、`dsh` 可执行文件）；端口已在监听则直接打开。
 - **单标签页复用** —— DSH 以唯一标签页展示（自定义 webview 承载），重复打开只聚焦、不新建；
@@ -66,16 +67,18 @@ node --test
 <a id="english"></a>
 # English
 
-**Open DSH** is a tiny VS Code extension: an activity-bar DSH icon (a sidebar "Open DSH"
-button) opens the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`)
-Web UI in a **single reusable editor tab** (re-clicking focuses the existing tab instead of
-stacking more; falls back to your system browser if the webview is unavailable), and can
-start / stop the `dsh web` server for the current workspace.
+**Open DSH** is a tiny VS Code extension: a capital-"D" button on the editor title bar
+(same row as the tabs) runs `DSH: Open DSH` with one click, opening the
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) Web UI in a
+**single reusable editor tab** (re-clicking focuses the existing tab instead of stacking
+more; falls back to your system browser if the webview is unavailable), and can start /
+stop the `dsh web` server for the current workspace.
 
 ## Features
 
-- **Sidebar quick launch** — the activity-bar DSH icon (a capital "D") opens a sidebar panel;
-  its "Open DSH" button is equivalent to the `DSH: Open DSH` command.
+- **Title-bar quick button** — a capital-"D" button at the right end of the editor tab row;
+  one click runs `DSH: Open DSH` (opens / focuses the single DSH tab), equivalent to the
+  command-palette command.
 - `DSH: Open DSH` — open the Web UI; if the server isn't running for the current workspace,
   it auto-starts it first (auto-detecting the workspace folder, its `.dsh/*.patch.yml` files,
   and the `dsh` executable). If the port is already listening, it just opens.
