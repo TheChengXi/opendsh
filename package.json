@@ -104,6 +104,11 @@
           "type": "boolean",
           "default": true,
           "description": "Start the dsh web server and open the DSH tab automatically when VS Code starts. Disable to open on demand only."
+        },
+        "opendsh.useSystemBrowser": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open the DSH UI in your system browser instead of the built-in DSH tab. Useful to test the dsh web UI itself with full browser features (address bar, devtools, extensions). Note: single-tab reuse does not apply to the system browser."
         }
       }
     }

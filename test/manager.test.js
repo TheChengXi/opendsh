@@ -71,7 +71,7 @@ function makeHarness(opts) {
     ...(opts.process || {}),
   };
 
-  const baseSettings = { host: '127.0.0.1', port: 3080, dshPath: '', patchFile: '' };
+  const baseSettings = { host: '127.0.0.1', port: 3080, dshPath: '', patchFile: '', useSystemBrowser: false };
   const cfgGet = (key) =>
     opts.settings && opts.settings[key] !== undefined ? opts.settings[key] : baseSettings[key];
 
@@ -202,6 +202,13 @@ test('open shows error when server fails to start (port timeout)', async () => {
 
 test('open falls back to external browser when createWebviewPanel throws', async () => {
   const h = makeHarness({ throwOnOpen: true });
+  await h.manager.open();
+  assert.strictEqual(h.calls.external.length, 1);
+  assert.strictEqual(h.calls.panels.length, 0);
+});
+
+test('open uses system browser directly when useSystemBrowser is set', async () => {
+  const h = makeHarness({ settings: { useSystemBrowser: true } });
   await h.manager.open();
   assert.strictEqual(h.calls.external.length, 1);
   assert.strictEqual(h.calls.panels.length, 0);
