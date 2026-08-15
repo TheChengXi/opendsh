@@ -44,15 +44,11 @@ test('resolveConfig falls back to defaults on missing/invalid values', () => {
   assert.strictEqual(detect.resolveConfig({ port: 70000 }).port, 3080);
 });
 
-test('resolveConfig resolves openWith and legacy useSystemBrowser alias', () => {
+test('resolveConfig resolves openWith with fallback to tab', () => {
   assert.strictEqual(detect.resolveConfig({ openWith: 'simpleBrowser' }).openWith, 'simpleBrowser');
   assert.strictEqual(detect.resolveConfig({ openWith: 'systemBrowser' }).openWith, 'systemBrowser');
   assert.strictEqual(detect.resolveConfig({ openWith: 'tab' }).openWith, 'tab');
-  // 旧设置兼容：useSystemBrowser=true 且未显式 openWith → systemBrowser
-  assert.strictEqual(detect.resolveConfig({ useSystemBrowser: true }).openWith, 'systemBrowser');
-  assert.strictEqual(detect.resolveConfig({ useSystemBrowser: true, openWith: 'tab' }).openWith, 'systemBrowser');
-  assert.strictEqual(detect.resolveConfig({ useSystemBrowser: true, openWith: 'simpleBrowser' }).openWith, 'simpleBrowser');
-  assert.strictEqual(detect.resolveConfig({ useSystemBrowser: false }).openWith, 'tab');
+  assert.strictEqual(detect.resolveConfig({}).openWith, 'tab');
 });
 
 test('resolveWorkspace returns first fsPath or null', () => {

@@ -11,7 +11,7 @@
  *
  * 验收条件：
  * - resolveConfig 对缺失/非法 host/port 回退默认 127.0.0.1/3080，detached/showWindow 非 true 一律回退 false，
- *   openWith 仅接受 tab/simpleBrowser/systemBrowser（其余回退 tab），useSystemBrowser=true 且未显式 openWith 时等价 systemBrowser
+ *   openWith 仅接受 tab/simpleBrowser/systemBrowser（其余回退 tab）
  * - resolvePatches 无 patch 目录返回 []，有则按文件名排序返回绝对路径，显式 patchFile 优先
  * - resolveDsh 优先级 = dshPath > npm 全局 > PATH，全部落空返回 null（不再 npx 兜底）
  * - resolveNpmGlobal 命中真实 lib/bin.js 返回 { command: node, prefixArgs: [binPath] }，未命中返回 null
@@ -39,12 +39,10 @@ function resolveConfig(settings) {
   const patchFile = typeof s.patchFile === 'string' ? s.patchFile.trim() : '';
   const detached = s.detached === true;
   const showWindow = s.showWindow === true;
-  // 打开方式三选一：tab（内置单例标签页，默认）/ simpleBrowser（VS Code 内置 Simple Browser）/ systemBrowser（系统浏览器）。
-  // useSystemBrowser 为兼容旧设置的别名：true 且未显式指定 openWith 时等价 systemBrowser。
+  // 打开方式三选一：tab（内置单例标签页，默认）/ simpleBrowser（VS Code 内置 Simple Browser）/ systemBrowser（系统浏览器）
   const openWithRaw = typeof s.openWith === 'string' ? s.openWith : 'tab';
   const openWith = openWithRaw === 'simpleBrowser' || openWithRaw === 'systemBrowser' ? openWithRaw : 'tab';
-  const effectiveOpenWith = openWith === 'tab' && s.useSystemBrowser === true ? 'systemBrowser' : openWith;
-  return { host, port: validPort, dshPath, patchFile, detached, showWindow, openWith: effectiveOpenWith };
+  return { host, port: validPort, dshPath, patchFile, detached, showWindow, openWith };
 }
 
 function resolveWorkspace(folders) {

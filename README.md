@@ -59,8 +59,6 @@
   `false` 时仅按需打开。
 - `opendsh.openWith`（默认 `"tab"`）—— 打开方式：`"tab"`（内置单例标签页）/ `"simpleBrowser"`（VS Code 内置
   Simple Browser，每次新建标签页）/ `"systemBrowser"`（系统浏览器直开 `http://host:port`）。
-- `opendsh.useSystemBrowser`（默认 `false`，已废弃）—— 旧设置，等价于 `opendsh.openWith = "systemBrowser"`；
-  请改用 `opendsh.openWith`。
 
 ## 安装
 
@@ -132,8 +130,6 @@ and can start / stop the `dsh web` server for the current workspace.
 - `opendsh.openWith` (default `"tab"`) — how to open the DSH UI: `"tab"` (built-in single
   reusable tab), `"simpleBrowser"` (VS Code's built-in Simple Browser, a new tab per open),
   or `"systemBrowser"` (system browser at `http://host:port`).
-- `opendsh.useSystemBrowser` (default `false`, deprecated) — legacy setting, equivalent to
-  `opendsh.openWith = "systemBrowser"`; use `opendsh.openWith` instead.
 
 ## Install
 
