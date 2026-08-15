@@ -23,6 +23,8 @@
   （打开 / 聚焦唯一的 DSH 标签页）。
 - **状态栏快捷按钮** —— 底部状态栏左侧的「DSH」按钮，同样单击直接执行 `DSH: Open DSH`；
   常驻显示，即使没有任何打开的标签页也能一键启动。
+- **启动自动打开（默认开启）** —— 由设置 `opendsh.autoStart`（默认 `true`）控制：VS Code 启动时
+  自动启动 dsh 服务并打开 DSH 标签页，重载 / 重启后标签页自动恢复；设为 `false` 则仅按需打开。
 - `DSH: Open DSH` —— 打开 Web UI：如果当前工作区的服务没在运行，会先自动启动（自动识别工作区目录、
   `.dsh/*.patch.yml` 补丁文件、`dsh` 可执行文件）；端口已在监听则直接打开。
 - **单标签页复用** —— DSH 以唯一标签页展示（自定义 webview 承载），重复打开只聚焦、不新建；
@@ -49,6 +51,8 @@
   再重新 `Open DSH` 才生效**。
 - `opendsh.showWindow`（默认 `false`）—— 是否弹出控制台窗口显示服务地址；`false` 时静默启动（日志在
   Output 面板 DSH 频道），`true` 时弹出窗口，关闭窗口即停止服务。
+- `opendsh.autoStart`（默认 `true`）—— VS Code 启动时是否自动启动 dsh 服务并打开 DSH 标签页；
+  `false` 时仅按需打开。
 
 ## 安装
 
@@ -82,6 +86,9 @@ and can start / stop the `dsh web` server for the current workspace.
   one click runs `DSH: Open DSH` (opens / focuses the single DSH tab).
 - **Status-bar quick button** — a "DSH" button at the left of the status bar; one click runs
   `DSH: Open DSH` too. It is always visible, so you can launch DSH even with no tabs open.
+- **Auto-start on launch (default on)** — controlled by the `opendsh.autoStart` setting
+  (default `true`): VS Code starts the dsh server and opens the DSH tab automatically, so the
+  tab comes back after a reload / restart. Set it to `false` to open on demand only.
 - `DSH: Open DSH` — open the Web UI; if the server isn't running for the current workspace,
   it auto-starts it first (auto-detecting the workspace folder, its `.dsh/*.patch.yml` files,
   and the `dsh` executable). If the port is already listening, it just opens.
@@ -105,6 +112,8 @@ and can start / stop the `dsh web` server for the current workspace.
 - `opendsh.dshPath` (default `""`) — path to `dsh`; empty means auto (npm global install, then PATH).
 - `opendsh.patchFile` (default `""`) — MCP patch file; empty means auto-discover
   `.dsh/*.patch.yml` in the workspace root.
+- `opendsh.autoStart` (default `true`) — whether VS Code auto-starts the dsh server and opens
+  the DSH tab on startup; `false` opens on demand only.
 
 ## Install
 

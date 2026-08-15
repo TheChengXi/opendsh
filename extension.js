@@ -3,14 +3,18 @@
  * VS Code 激活入口：注册 open/stop 命令、URI 深链与状态栏快捷按钮（点击执行 opendsh.open），
  * 读设置并交予 manager，自身无业务逻辑。编辑器标题栏按钮（大写 D）由 package.json 的
  * contributes.menus.editor/title 声明（点击同样执行 opendsh.open），无需代码注册。
+ * 启动自启：按 opendsh.autoStart（默认 true）在窗口就绪后自动调用 manager.open()
+ * （启动 dsh 服务 + 打开 DSH 标签页），实现重载/重启后标签页自动恢复。
  *
  * 边界：URI 仅处理 /open 路径；状态栏按钮常驻显示（无标签页时也能快捷启动），
  * 标题栏按钮随标签栏显示（有标签页时可用）；
+ * autoStart 触发 open 失败时沿用 manager 的错误弹窗（无工作区/dsh 缺失等）；
  * deactivate 返回 manager.dispose()，VS Code 关闭/重载窗口时同步终止本窗口启动的 dsh 服务（随 VS Code 关闭）。
  *
  * 验收条件：
  * - 注册 opendsh.open / opendsh.stop 两条命令
  * - 创建状态栏按钮（text「DSH」/ command=opendsh.open）并 show
+ * - 启动时 autoStart 非 false 则调用 manager.open()
  * - registerUriHandler 将 /open 映射到 manager.open
  * - deactivate 调用 manager.dispose()（无 manager 时安全返回）
  */
@@ -38,6 +42,11 @@ function activate(context) {
   statusItem.tooltip = 'Open DSH';
   context.subscriptions.push(statusItem);
   statusItem.show();
+
+  // 启动自启（opendsh.autoStart 默认 true）：重载/重启后自动恢复服务与 DSH 标签页
+  if (vscode.workspace.getConfiguration('opendsh').get('autoStart', true)) {
+    manager.open();
+  }
 
   context.subscriptions.push(
     vscode.window.registerUriHandler({

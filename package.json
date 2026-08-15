@@ -99,6 +99,11 @@
           "type": "boolean",
           "default": false,
           "description": "Show a console window for the DSH server; closing the window stops the server. Default false: silent startup with logs in the Output panel."
+        },
+        "opendsh.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the dsh web server and open the DSH tab automatically when VS Code starts. Disable to open on demand only."
         }
       }
     }
