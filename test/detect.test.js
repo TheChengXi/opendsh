@@ -28,20 +28,31 @@ test('resolveConfig falls back to defaults on missing/invalid values', () => {
     patchFile: '',
     detached: false,
     showWindow: false,
-    useSystemBrowser: false,
+    openWith: 'tab',
   });
-  assert.deepStrictEqual(detect.resolveConfig({ host: '', port: 'abc', dshPath: '  ', patchFile: 5, detached: 'yes', showWindow: 1, useSystemBrowser: 'yes' }), {
+  assert.deepStrictEqual(detect.resolveConfig({ host: '', port: 'abc', dshPath: '  ', patchFile: 5, detached: 'yes', showWindow: 1, openWith: 'bogus' }), {
     host: '127.0.0.1',
     port: 3080,
     dshPath: '',
     patchFile: '',
     detached: false,
     showWindow: false,
-    useSystemBrowser: false,
+    openWith: 'tab',
   });
   assert.strictEqual(detect.resolveConfig({ host: 'localhost', port: '8080' }).port, 8080);
   assert.strictEqual(detect.resolveConfig({ port: 0 }).port, 3080);
   assert.strictEqual(detect.resolveConfig({ port: 70000 }).port, 3080);
+});
+
+test('resolveConfig resolves openWith and legacy useSystemBrowser alias', () => {
+  assert.strictEqual(detect.resolveConfig({ openWith: 'simpleBrowser' }).openWith, 'simpleBrowser');
+  assert.strictEqual(detect.resolveConfig({ openWith: 'systemBrowser' }).openWith, 'systemBrowser');
+  assert.strictEqual(detect.resolveConfig({ openWith: 'tab' }).openWith, 'tab');
+  // 旧设置兼容：useSystemBrowser=true 且未显式 openWith → systemBrowser
+  assert.strictEqual(detect.resolveConfig({ useSystemBrowser: true }).openWith, 'systemBrowser');
+  assert.strictEqual(detect.resolveConfig({ useSystemBrowser: true, openWith: 'tab' }).openWith, 'systemBrowser');
+  assert.strictEqual(detect.resolveConfig({ useSystemBrowser: true, openWith: 'simpleBrowser' }).openWith, 'simpleBrowser');
+  assert.strictEqual(detect.resolveConfig({ useSystemBrowser: false }).openWith, 'tab');
 });
 
 test('resolveWorkspace returns first fsPath or null', () => {
@@ -292,11 +303,8 @@ test('resolveNpmGlobal uses resolved node path not execPath', async () => {
   }
 });
 
-test('resolveConfig passes through detached/showWindow/useSystemBrowser booleans', () => {
-  const r = detect.resolveConfig({ detached: true, showWindow: true, useSystemBrowser: true });
+test('resolveConfig passes through detached/showWindow booleans', () => {
+  const r = detect.resolveConfig({ detached: true, showWindow: true });
   assert.strictEqual(r.detached, true);
   assert.strictEqual(r.showWindow, true);
-  assert.strictEqual(r.useSystemBrowser, true);
-  const d = detect.resolveConfig({});
-  assert.strictEqual(d.useSystemBrowser, false);
 });

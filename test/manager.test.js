@@ -22,6 +22,7 @@ function makeHarness(opts) {
   const calls = {
     messages: [],
     panels: [],
+    opened: [],
     external: [],
     spawned: null,
     spawnCount: 0,
@@ -71,7 +72,7 @@ function makeHarness(opts) {
     ...(opts.process || {}),
   };
 
-  const baseSettings = { host: '127.0.0.1', port: 3080, dshPath: '', patchFile: '', useSystemBrowser: false };
+  const baseSettings = { host: '127.0.0.1', port: 3080, dshPath: '', patchFile: '', openWith: 'tab' };
   const cfgGet = (key) =>
     opts.settings && opts.settings[key] !== undefined ? opts.settings[key] : baseSettings[key];
 
@@ -82,6 +83,12 @@ function makeHarness(opts) {
     },
     Uri: { parse: (u) => u },
     ViewColumn: { Active: 1 },
+    commands: {
+      executeCommand: async (cmd, uri) => {
+        if (opts.throwOnOpen) throw new Error('no simple browser');
+        calls.opened.push({ cmd, uri });
+      },
+    },
     env: { openExternal: async (uri) => calls.external.push(uri) },
     window: {
       showErrorMessage: (m) => calls.messages.push({ kind: 'error', m }),
@@ -207,8 +214,24 @@ test('open falls back to external browser when createWebviewPanel throws', async
   assert.strictEqual(h.calls.panels.length, 0);
 });
 
-test('open uses system browser directly when useSystemBrowser is set', async () => {
-  const h = makeHarness({ settings: { useSystemBrowser: true } });
+test('open uses system browser directly when openWith is systemBrowser', async () => {
+  const h = makeHarness({ settings: { openWith: 'systemBrowser' } });
+  await h.manager.open();
+  assert.strictEqual(h.calls.external.length, 1);
+  assert.strictEqual(h.calls.panels.length, 0);
+});
+
+test('open uses simple browser when openWith is simpleBrowser', async () => {
+  const h = makeHarness({ settings: { openWith: 'simpleBrowser' } });
+  await h.manager.open();
+  assert.strictEqual(h.calls.opened.length, 1);
+  assert.strictEqual(h.calls.opened[0].cmd, 'simpleBrowser.api.open');
+  assert.strictEqual(h.calls.panels.length, 0);
+  assert.strictEqual(h.calls.external.length, 0);
+});
+
+test('open falls back to external browser when simpleBrowser throws', async () => {
+  const h = makeHarness({ settings: { openWith: 'simpleBrowser' }, throwOnOpen: true });
   await h.manager.open();
   assert.strictEqual(h.calls.external.length, 1);
   assert.strictEqual(h.calls.panels.length, 0);

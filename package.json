@@ -105,10 +105,17 @@
           "default": true,
           "description": "Start the dsh web server and open the DSH tab automatically when VS Code starts. Disable to open on demand only."
         },
+        "opendsh.openWith": {
+          "type": "string",
+          "enum": ["tab", "simpleBrowser", "systemBrowser"],
+          "default": "tab",
+          "description": "How to open the DSH UI: 'tab' (built-in single reusable tab, default), 'simpleBrowser' (VS Code's built-in Simple Browser, one new tab per open), or 'systemBrowser' (your system browser at http://host:port)."
+        },
         "opendsh.useSystemBrowser": {
           "type": "boolean",
           "default": false,
-          "description": "Open the DSH UI in your system browser instead of the built-in DSH tab. Useful to test the dsh web UI itself with full browser features (address bar, devtools, extensions). Note: single-tab reuse does not apply to the system browser."
+          "description": "Open the DSH UI in your system browser instead of the built-in DSH tab.",
+          "deprecationMessage": "Deprecated: use 'opendsh.openWith' = 'systemBrowser' instead."
         }
       }
     }

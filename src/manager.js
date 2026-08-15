@@ -5,17 +5,19 @@
  * 启动诊断经 outputChannel 输出，失败弹窗带具体原因。
  * 打开统一走 webview 单例：面板存活则聚焦（reveal），否则 createWebviewPanel 新建唯一标签页
  * （iframe 承载 DSH UI，html 由 webview 模块生成）；端口未监听路径（含重启）重设 html 强制重载；
- * useSystemBrowser=true 时绕过 webview 封装，用系统浏览器直接浏览 http://host:port。
+ * 打开方式按 config.openWith 分叉：systemBrowser → openExternal 直开；simpleBrowser → VS Code 内置浏览器
+ * （每次新建标签页）；tab（默认）→ webview 单例。
  *
  * 边界：端口未监听且无工作区时报错返回不抛异常；resolveDsh 返回 null 时快速失败提示配置/安装 dsh；
  * spawn 失败报错返回；端口等待超时报错且不打开；端口被非 dsh 进程占用（无 child 且 httpProbe 不匹配）时报错不打开；
  * stop 无记录实例时仅提示不抛异常；createWebviewPanel 抛错回退 openExternal；
  * 标签页关闭（onDidDispose）仅清面板引用，不触碰子进程；
- * useSystemBrowser 时不创建/复用面板，无单标签页语义。
+ * systemBrowser/simpleBrowser 方式不创建/复用面板，无单标签页语义；simpleBrowser 抛错回退 openExternal。
  *
  * 验收条件：
  * - open 端口未监听时 spawn → 等待端口就绪 → openWebview；已监听时跳过 spawn 直接 openWebview
- * - useSystemBrowser=true 时 openWebview 直接 openExternal，不创建面板
+ * - openWith=systemBrowser 时 openWebview 直接 openExternal，不创建面板
+ * - openWith=simpleBrowser 时走 simpleBrowser.api.open，抛错回退 openExternal
  * - openWebview 面板存活时 reveal 不新建；端口未监听路径传 reload=true 重设 html
  * - onDidDispose 清引用后再次 open 重新创建面板
  * - createWebviewPanel 抛错时回退 openExternal
@@ -115,15 +117,24 @@ function createManager(deps) {
       patchFile: cfg.get('patchFile'),
       detached: cfg.get('detached'),
       showWindow: cfg.get('showWindow'),
-      useSystemBrowser: cfg.get('useSystemBrowser'),
+      openWith: cfg.get('openWith'),
     };
   }
 
   async function openWebview(config, opts) {
     const url = detect.buildUrl(config.host, config.port);
-    if (config.useSystemBrowser) {
-      // 用系统浏览器直接浏览 http://host:port，绕过内置 webview 封装（完整浏览器能力，适合测试 dsh 自身 UI）
+    if (config.openWith === 'systemBrowser') {
+      // 系统浏览器直接浏览 http://host:port，绕过内置 webview 封装（完整浏览器能力，适合测试 dsh 自身 UI）
       await vscode.env.openExternal(vscode.Uri.parse(url));
+      return;
+    }
+    if (config.openWith === 'simpleBrowser') {
+      // VS Code 内置 Simple Browser（旧版默认打开方式）：每次新建标签页，失败回退系统浏览器
+      try {
+        await vscode.commands.executeCommand('simpleBrowser.api.open', vscode.Uri.parse(url));
+      } catch (err) {
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+      }
       return;
     }
     if (panel) {
