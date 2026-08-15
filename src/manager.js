@@ -1,20 +1,33 @@
 /**
  * @intent
- * 生命周期编排：open/stop。open 端口已监听则直接打开，未监听则自动启动并等待端口就绪后再打开——启动判定封装在代码层，用户无需显式 start；
- * 持有当前子进程引用，屏蔽 VS Code 交互细节。
+ * 生命周期编排：open/stop。open 端口已监听则直接打开，未监听则自动启动并等待端口就绪后再打开；
+ * 已有存活 child 时复用等待，不重复 spawn（启动去重）；持有当前子进程引用，屏蔽 VS Code 交互细节；
+ * 启动诊断经 outputChannel 输出，失败弹窗带具体原因。
  *
- * 边界：端口未监听且无工作区时报错返回不抛异常；spawn 失败报错返回；端口等待超时报错且不打开；
+ * 边界：端口未监听且无工作区时报错返回不抛异常；resolveDsh 返回 null 时快速失败提示配置/安装 dsh；
+ * spawn 失败报错返回；端口等待超时报错且不打开；端口被非 dsh 进程占用（无 child 且 httpProbe 不匹配）时报错不打开；
  * stop 无记录实例时仅提示不抛异常；打开优先 simpleBrowser.api.open、失败回退 openExternal。
  *
  * 验收条件：
  * - open 端口未监听时 spawn → 等待端口就绪 → open；已监听时跳过 spawn 直接 open
+ * - 已有存活 child 再 open：复用 waitForPort，不重复 spawn
+ * - 端口被其他程序占用（无 child 且探测不匹配）报错不打开
  * - 端口未监听且无工作区时报错且不 spawn
+ * - resolveDsh 为 null 时报错且不 spawn
  * - 端口等待超时报错且不 open
- * - 端口已监听时 open 无需工作区也能直接打开
+ * - 启动日志写入 outputChannel，失败弹窗附 stderr 摘要
  * - stop 无 child 时提示且不抛异常
+ * - dispose 静默终止 child（不弹消息），无 child 时安全返回；detached=true（独立存活）时不终止
+ * - spawn 透传 showWindow 决定窗口/静默模式
+ * - 启动成功后写 pid 到 <workspace>/.dsh/opendsh.pid；stop 无 child 时读 pid 文件停止残留服务（经端口/httpProbe 验证防误杀），成功删文件
+ * - dispose 杀掉后删 pid 文件；detached 独立模式不删（跨会话 stop 可用）
+ * - detached=true 时走 spawnStandalone（Windows WMI 脱离 VS Code job），child 变为 { pid } 伪对象，日志经窗口展示
  */
 
 'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
 
 function createManager(deps) {
   const detect = deps.detect;
@@ -22,6 +35,63 @@ function createManager(deps) {
   const vscode = deps.vscode;
 
   let child = null;
+  let stderrTail = '';
+  let startedDetached = false; // 启动时记录的独立存活模式，dispose 用它而非关闭时读配置
+  const channel =
+    typeof vscode.window.createOutputChannel === 'function'
+      ? vscode.window.createOutputChannel('DSH')
+      : null;
+
+  function log(line) {
+    if (channel && typeof channel.appendLine === 'function') {
+      channel.appendLine('[opendsh] ' + line);
+    }
+  }
+
+  function pidFilePath(workspace) {
+    return workspace ? path.join(workspace, '.dsh', 'opendsh.pid') : null;
+  }
+
+  function writePidFile(workspace, pid) {
+    const p = pidFilePath(workspace);
+    if (!p) return;
+    try {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, String(pid), 'utf8');
+    } catch (err) {
+      log('pid file write failed: ' + (err && err.message ? err.message : err));
+    }
+  }
+
+  function readPidFile(workspace) {
+    const p = pidFilePath(workspace);
+    if (!p) return null;
+    try {
+      const pid = Number(fs.readFileSync(p, 'utf8').trim());
+      return Number.isInteger(pid) && pid > 0 ? pid : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function removePidFile(workspace) {
+    const p = pidFilePath(workspace);
+    if (!p) return;
+    try {
+      fs.unlinkSync(p);
+    } catch (err) {
+      // file already gone; ignore
+    }
+  }
+
+  function attachStderr(c) {
+    if (!c || !c.stderr) return;
+    c.stderr.setEncoding('utf8');
+    c.stderr.on('data', (chunk) => {
+      stderrTail = (stderrTail + chunk).slice(-2048);
+      if (channel && typeof channel.append === 'function') channel.append(chunk);
+    });
+  }
 
   function readSettings() {
     const cfg = vscode.workspace.getConfiguration('opendsh');
@@ -30,6 +100,8 @@ function createManager(deps) {
       port: cfg.get('port'),
       dshPath: cfg.get('dshPath'),
       patchFile: cfg.get('patchFile'),
+      detached: cfg.get('detached'),
+      showWindow: cfg.get('showWindow'),
     };
   }
 
@@ -45,54 +117,159 @@ function createManager(deps) {
 
   async function open() {
     const config = detect.resolveConfig(readSettings());
-    if (await proc.isPortInUse(config.host, config.port)) {
+    const port = config.port;
+
+    if (await proc.isPortInUse(config.host, port)) {
+      // 端口已监听：本窗口 child 或外部 dsh → 打开；其他程序占用 → 报错
+      if (child && !child.killed) {
+        log('port ' + port + ' listening (child pid=' + child.pid + '); opening');
+        await openBrowser(config);
+        return;
+      }
+      const isDsh = await proc.httpProbe(config.host, port);
+      if (isDsh) {
+        log('port ' + port + ' listening (external dsh); opening');
+        await openBrowser(config);
+      } else {
+        log('port ' + port + ' in use by another program; reporting');
+        vscode.window.showErrorMessage('DSH: port ' + port + ' is in use by another program.');
+      }
+      return;
+    }
+
+    // 端口空闲但已有本窗口 child 在启动中：复用等待，不重复 spawn
+    if (child && !child.killed) {
+      log('child pid=' + child.pid + ' starting; reusing (no duplicate spawn)');
+      const ready = await proc.waitForPort(config.host, port);
+      if (!ready) {
+        const tail = stderrTail.trim();
+        vscode.window.showErrorMessage(
+          'DSH: server did not start (port not listening).' + (tail ? '\n' + tail.slice(-300) : '')
+        );
+        return;
+      }
       await openBrowser(config);
       return;
     }
+
     const workspace = detect.resolveWorkspace(vscode.workspace.workspaceFolders);
     if (!workspace) {
       vscode.window.showErrorMessage('DSH: open a workspace folder first.');
       return;
     }
     const patches = detect.resolvePatches(config, workspace);
-    const resolved = detect.resolveDsh(config);
+    const resolved = await detect.resolveDsh(config);
+    if (!resolved) {
+      log('dsh not found; failing fast');
+      vscode.window.showErrorMessage(
+        'DSH: dsh not found. Install globally (npm i -g @deepseek-ai/dsh) or set opendsh.dshPath.'
+      );
+      return;
+    }
+    log(
+      'spawning: ' +
+        resolved.command +
+        (resolved.prefixArgs && resolved.prefixArgs.length ? ' ' + resolved.prefixArgs.join(' ') : '') +
+        ' web (port ' + port + ')'
+    );
     try {
-      child = proc.spawnDsh(resolved, {
-        host: config.host,
-        port: config.port,
-        patches,
-        cwd: workspace,
-      });
+      if (config.detached) {
+        // 独立存活模式：Windows 经 WMI 脱离 VS Code job（真独立），POSIX 走 detached spawn
+        const spawned = await proc.spawnStandalone(resolved, {
+          host: config.host,
+          port,
+          patches,
+          cwd: workspace,
+          showWindow: config.showWindow,
+        });
+        child = { pid: spawned.pid }; // 伪 child：仅 pid（WMI 进程非本进程子进程，无 stderr/exit 事件）
+      } else {
+        child = proc.spawnDsh(resolved, {
+          host: config.host,
+          port,
+          patches,
+          cwd: workspace,
+          showWindow: config.showWindow,
+        });
+      }
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       vscode.window.showErrorMessage('DSH: failed to start: ' + msg);
       return;
     }
-    const ready = await proc.waitForPort(config.host, config.port);
+    attachStderr(child);
+    writePidFile(workspace, child.pid);
+    startedDetached = config.detached;
+    const ready = await proc.waitForPort(config.host, port);
     if (!ready) {
-      vscode.window.showErrorMessage('DSH: server did not start (port not listening).');
+      const tail = stderrTail.trim();
+      vscode.window.showErrorMessage(
+        'DSH: server did not start (port not listening).' + (tail ? '\n' + tail.slice(-300) : '')
+      );
       return;
     }
+    log('port ' + port + ' ready; opening');
     await openBrowser(config);
   }
 
   async function stop() {
-    if (!child) {
+    const workspace = detect.resolveWorkspace(vscode.workspace.workspaceFolders);
+    if (child) {
+      const stopped = await proc.killDsh(child);
+      child = null;
+      stderrTail = '';
+      startedDetached = false;
+      removePidFile(workspace);
+      if (stopped) {
+        vscode.window.showInformationMessage('DSH: stopped.');
+      } else {
+        vscode.window.showErrorMessage('DSH: failed to stop.');
+      }
+      return;
+    }
+    // 无 child（重载/跨会话）：读 pid 文件停残留服务，经端口+httpProbe 验证防误杀
+    const pid = readPidFile(workspace);
+    if (!pid) {
       vscode.window.showInformationMessage('DSH: not running (no instance started by this window).');
       return;
     }
-    const stopped = await proc.killDsh(child);
-    child = null;
+    const config = detect.resolveConfig(readSettings());
+    if (await proc.isPortInUse(config.host, config.port)) {
+      const isDsh = await proc.httpProbe(config.host, config.port);
+      if (!isDsh) {
+        vscode.window.showErrorMessage('DSH: port ' + config.port + ' is in use by another program.');
+        return;
+      }
+    } else {
+      // 端口未监听：pid 文件过期，清理后提示
+      removePidFile(workspace);
+      vscode.window.showInformationMessage('DSH: not running (no instance started by this window).');
+      return;
+    }
+    const stopped = await proc.killPid(pid);
     if (stopped) {
+      removePidFile(workspace);
       vscode.window.showInformationMessage('DSH: stopped.');
     } else {
       vscode.window.showErrorMessage('DSH: failed to stop.');
     }
   }
 
+  async function dispose() {
+    if (!child) return;
+    if (startedDetached) return; // 启动时为独立存活模式：不随编辑器关闭终止服务
+    const c = child;
+    child = null;
+    stderrTail = '';
+    const workspace = detect.resolveWorkspace(vscode.workspace.workspaceFolders);
+    await proc.killDsh(c);
+    removePidFile(workspace);
+  }
+
   return {
     open,
     stop,
+    dispose,
     getChild: () => child,
   };
 }

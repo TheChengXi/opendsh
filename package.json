@@ -73,12 +73,22 @@
         "opendsh.dshPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the dsh executable. Empty means auto-resolve from PATH, then fall back to npx."
+          "description": "Path to the dsh executable. Empty means auto-resolve (npm global install, then PATH); an error is shown when dsh is not found."
         },
         "opendsh.patchFile": {
           "type": "string",
           "default": "",
           "description": "MCP patch file passed to 'dsh web'. Empty means auto-discover .dsh/*.patch.yml in the workspace."
+        },
+        "opendsh.detached": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep the DSH server running after VS Code exits. On Windows it is started via WMI outside VS Code's process tree, so it truly survives VS Code close (with its own console window when showWindow is on). Default false: server stops with VS Code. The launch mode is fixed at start time: changing this setting only affects the next launch, so Stop DSH (or Close) first, then Open DSH again."
+        },
+        "opendsh.showWindow": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a console window for the DSH server; closing the window stops the server. Default false: silent startup with logs in the Output panel."
         }
       }
     }

@@ -1,14 +1,20 @@
 /**
  * @intent
  * 把「自动检索」收敛为纯函数：解析设置、定位工作区、发现 MCP patch、解析 dsh 可执行、组装打开 URL。
+ * dsh 定位优先级 = dshPath 设置 > npm 全局安装真实入口（node + bin.js）> PATH；全部落空返回 null 快速失败，绝不进入 npx 慢路径。
  *
  * 边界：任何检索失败都不抛异常——无工作区返回 null、无 patch 目录返回空数组、非法/缺失端口回退 3080、
- * 找不到 dsh 走 npx @deepseek-ai/dsh 兜底；代码内无 URL 字面量，地址由 buildUrl 组装。
+ * 找不到 dsh 返回 null 由 manager 报错；resolveNpmGlobal 先走 APPDATA\npm 同步快速路径（零开销），
+ * 未命中再经注入的 execFile 跑 npm prefix -g（模块级缓存）；node 路径经 resolveNode 探测——
+ * execPath 本身是 node 才直接复用，否则回退 PATH/常见安装位/命令名（VS Code 扩展 host 的 execPath 是 Code.exe，不可作 node）；
+ * 代码内无 URL 字面量，地址由 buildUrl 组装。
  *
  * 验收条件：
- * - resolveConfig 对缺失/非法 host/port 回退默认 127.0.0.1/3080
+ * - resolveConfig 对缺失/非法 host/port 回退默认 127.0.0.1/3080，detached/showWindow 非 true 一律回退 false
  * - resolvePatches 无 patch 目录返回 []，有则按文件名排序返回绝对路径，显式 patchFile 优先
- * - resolveDsh 优先级 = dshPath > PATH 的 dsh > npx @deepseek-ai/dsh
+ * - resolveDsh 优先级 = dshPath > npm 全局 > PATH，全部落空返回 null（不再 npx 兜底）
+ * - resolveNpmGlobal 命中真实 lib/bin.js 返回 { command: node, prefixArgs: [binPath] }，未命中返回 null
+ * - resolveNode 在 execPath 非 node（如 Code.exe）时回退 PATH/Program Files/命令名，绝不返回非 node 可执行
  * - buildUrl(host, port) 返回 http://host:port
  */
 
@@ -20,6 +26,9 @@ const path = require('node:path');
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3080;
 
+// npm prefix -g 结果缓存：undefined = 未探测，string/null = 已探测（null 表示探测失败，不再重试）
+let cachedNpmPrefix;
+
 function resolveConfig(settings) {
   const s = settings || {};
   const host = typeof s.host === 'string' && s.host.trim() !== '' ? s.host.trim() : DEFAULT_HOST;
@@ -27,7 +36,9 @@ function resolveConfig(settings) {
   const validPort = Number.isInteger(port) && port >= 1 && port <= 65535 ? port : DEFAULT_PORT;
   const dshPath = typeof s.dshPath === 'string' ? s.dshPath.trim() : '';
   const patchFile = typeof s.patchFile === 'string' ? s.patchFile.trim() : '';
-  return { host, port: validPort, dshPath, patchFile };
+  const detached = s.detached === true;
+  const showWindow = s.showWindow === true;
+  return { host, port: validPort, dshPath, patchFile, detached, showWindow };
 }
 
 function resolveWorkspace(folders) {
@@ -82,15 +93,90 @@ function findOnPath(cmd, pathEnv, isWin) {
   return null;
 }
 
-function resolveDsh(config, deps) {
+function resolveNode(deps) {
+  const d = deps || {};
+  const isWin = typeof d.isWin === 'boolean' ? d.isWin : process.platform === 'win32';
+  const pathEnv = d.pathEnv !== undefined ? d.pathEnv : (process.env && process.env.PATH) || '';
+  const execPath = d.nodePath || d.execPath || process.execPath;
+  const env = d.env || process.env;
+
+  // 1) execPath 本身就是 node → 直接复用（普通 node 进程、测试注入 nodePath 走这里）
+  if (execPath) {
+    const base = path.basename(String(execPath)).toLowerCase();
+    if (base === 'node' || base === 'node.exe') return execPath;
+  }
+  // 2) PATH 查找 node（.exe 优先）
+  const found = findOnPath('node', pathEnv, isWin);
+  if (found) return found;
+  // 3) 常见安装位置（Windows）
+  if (isWin) {
+    const roots = [env.ProgramFiles, env['ProgramFiles(x86)']].filter(Boolean);
+    for (const root of roots) {
+      const candidate = path.join(root, 'nodejs', 'node.exe');
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch (err) {
+        // not installed at this root
+      }
+    }
+  }
+  // 4) 最后手段：'node' 命令名，由 CreateProcess 按 PATH/PATHEXT 解析
+  return 'node';
+}
+
+function runNpmPrefix(execFile) {
+  if (typeof execFile !== 'function') return null;
+  return new Promise((resolve) => {
+    execFile('npm', ['prefix', '-g'], (err, stdout) => {
+      if (err) return resolve(null);
+      const prefix = String(stdout || '').trim();
+      resolve(prefix || null);
+    });
+  });
+}
+
+async function resolveNpmGlobal(deps) {
+  const d = deps || {};
+  const isWin = typeof d.isWin === 'boolean' ? d.isWin : process.platform === 'win32';
+  const env = d.env || process.env;
+  const nodePath = resolveNode(d);
+
+  // 快速路径：Windows npm 默认前缀 %APPDATA%\npm，同步 stat 零开销命中
+  if (isWin && env.APPDATA) {
+    const fast = path.join(env.APPDATA, 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+    try {
+      if (fs.statSync(fast).isFile()) return { command: nodePath, prefixArgs: [fast] };
+    } catch (err) {
+      // not present in default npm prefix; fall through to npm prefix -g
+    }
+  }
+
+  // 权威路径：npm prefix -g，仅首次 spawn，结果缓存到进程生命周期
+  if (cachedNpmPrefix === undefined) {
+    cachedNpmPrefix = await runNpmPrefix(d.execFile);
+  }
+  const prefix = cachedNpmPrefix;
+  if (!prefix) return null;
+  const bin = path.join(prefix, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+  try {
+    if (fs.statSync(bin).isFile()) return { command: nodePath, prefixArgs: [bin] };
+  } catch (err) {
+    // global install not found under npm prefix
+  }
+  return null;
+}
+
+async function resolveDsh(config, deps) {
   const cfg = config || {};
   const d = deps || {};
   const isWin = typeof d.isWin === 'boolean' ? d.isWin : process.platform === 'win32';
   const pathEnv = d.pathEnv !== undefined ? d.pathEnv : (process.env && process.env.PATH) || '';
   if (cfg.dshPath) return { command: cfg.dshPath, prefixArgs: [] };
+  const globalResolved = await resolveNpmGlobal(d);
+  if (globalResolved) return globalResolved;
   const found = findOnPath('dsh', pathEnv, isWin);
   if (found) return { command: found, prefixArgs: [] };
-  return { command: 'npx', prefixArgs: ['@deepseek-ai/dsh'] };
+  return null;
 }
 
 function buildUrl(host, port) {
@@ -103,6 +189,8 @@ module.exports = {
   findPatchFiles,
   resolvePatches,
   findOnPath,
+  resolveNode,
+  resolveNpmGlobal,
   resolveDsh,
   buildUrl,
   DEFAULT_HOST,
