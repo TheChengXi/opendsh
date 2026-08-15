@@ -1,6 +1,7 @@
 node_modules/
 *.vsix
 .vscode/
+token.text
 
 # workspace-local tooling and process docs (not part of the published plugin)
 .dsh/
