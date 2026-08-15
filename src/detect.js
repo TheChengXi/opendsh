@@ -10,7 +10,7 @@
  * 代码内无 URL 字面量，地址由 buildUrl 组装。
  *
  * 验收条件：
- * - resolveConfig 对缺失/非法 host/port 回退默认 127.0.0.1/3080，detached/showWindow 非 true 一律回退 false，
+ * - resolveConfig 对缺失/非法 host/port 回退默认 127.0.0.1/3080，detached/showWindow/multipleTabs 非 true 一律回退 false，
  *   openWith 仅接受 tab/simpleBrowser/systemBrowser（其余回退 tab）
  * - resolvePatches 无 patch 目录返回 []，有则按文件名排序返回绝对路径，显式 patchFile 优先
  * - resolveDsh 优先级 = dshPath > npm 全局 > PATH，全部落空返回 null（不再 npx 兜底）
@@ -42,7 +42,8 @@ function resolveConfig(settings) {
   // 打开方式三选一：tab（内置单例标签页，默认）/ simpleBrowser（VS Code 内置 Simple Browser）/ systemBrowser（系统浏览器）
   const openWithRaw = typeof s.openWith === 'string' ? s.openWith : 'tab';
   const openWith = openWithRaw === 'simpleBrowser' || openWithRaw === 'systemBrowser' ? openWithRaw : 'tab';
-  return { host, port: validPort, dshPath, patchFile, detached, showWindow, openWith };
+  const multipleTabs = s.multipleTabs === true;
+  return { host, port: validPort, dshPath, patchFile, detached, showWindow, openWith, multipleTabs };
 }
 
 function resolveWorkspace(folders) {

@@ -29,6 +29,9 @@
   - `"tab"`：内置单例标签页（默认，重复打开只聚焦不新建）
   - `"simpleBrowser"`：VS Code 内置 Simple Browser（每次打开新建标签页，即单标签页改造前的默认方式）
   - `"systemBrowser"`：系统浏览器直接浏览 `http://host:port`（保留地址栏 / DevTools / 扩展等完整浏览器能力）
+- **多标签页（可选）** —— 设置 `opendsh.multipleTabs`（默认 `false`）为 `true` 时，`"tab"` 方式下每次打开都
+  新建独立 DSH 标签页（所有标签页共享同一个 dsh 服务端口），适合对照查看；所有打开操作带 300ms 防连点节流，
+  避免误触多开。
 - `DSH: Open DSH` —— 打开 Web UI：如果当前工作区的服务没在运行，会先自动启动（自动识别工作区目录、
   `.dsh/*.patch.yml` 补丁文件、`dsh` 可执行文件）；端口已在监听则直接打开。
 - **单标签页复用** —— DSH 以唯一标签页展示（自定义 webview 承载），重复打开只聚焦、不新建；
@@ -59,6 +62,8 @@
   `false` 时仅按需打开。
 - `opendsh.openWith`（默认 `"tab"`）—— 打开方式：`"tab"`（内置单例标签页）/ `"simpleBrowser"`（VS Code 内置
   Simple Browser，每次新建标签页）/ `"systemBrowser"`（系统浏览器直开 `http://host:port`）。
+- `opendsh.multipleTabs`（默认 `false`）—— 是否允许多个 DSH 标签页并存（仅对 `openWith = "tab"` 生效）；
+  `true` 时每次打开新建标签页，所有标签页共享同一服务端口。
 
 ## 安装
 
@@ -102,6 +107,10 @@ and can start / stop the `dsh web` server for the current workspace.
     way before the single-tab change).
   - `"systemBrowser"`: your system browser at `http://host:port` (full browser capabilities:
     address bar, devtools, extensions).
+- **Multiple tabs (optional)** — set `opendsh.multipleTabs` (default `false`) to `true` to have
+  every open create a separate DSH tab in `"tab"` mode (all tabs share the same dsh server on
+  one port), handy for side-by-side views. All open actions are throttled (300ms) to avoid
+  accidental duplicates from rapid clicks.
 - `DSH: Open DSH` — open the Web UI; if the server isn't running for the current workspace,
   it auto-starts it first (auto-detecting the workspace folder, its `.dsh/*.patch.yml` files,
   and the `dsh` executable). If the port is already listening, it just opens.
@@ -130,6 +139,8 @@ and can start / stop the `dsh web` server for the current workspace.
 - `opendsh.openWith` (default `"tab"`) — how to open the DSH UI: `"tab"` (built-in single
   reusable tab), `"simpleBrowser"` (VS Code's built-in Simple Browser, a new tab per open),
   or `"systemBrowser"` (system browser at `http://host:port`).
+- `opendsh.multipleTabs` (default `false`) — allow multiple DSH tabs (only when
+  `opendsh.openWith` is `"tab"`); `true` opens a new tab per open, all sharing one server port.
 
 ## Install
 

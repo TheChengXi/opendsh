@@ -6,16 +6,19 @@
  * 打开统一走 webview 单例：面板存活则聚焦（reveal），否则 createWebviewPanel 新建唯一标签页
  * （iframe 承载 DSH UI，html 由 webview 模块生成）；端口未监听路径（含重启）重设 html 强制重载；
  * 打开方式按 config.openWith 分叉：systemBrowser → openExternal 直开；simpleBrowser → VS Code 内置浏览器
- * （每次新建标签页）；tab（默认）→ webview 单例。
+ * （每次新建标签页）；tab（默认）→ webview 单例，multipleTabs=true 时每次新建独立标签页（共享同一服务端口）；
+ * open 入口有防连点节流（debounceMs，默认 300ms），窗口内重复触发直接忽略。
  *
  * 边界：端口未监听且无工作区时报错返回不抛异常；resolveDsh 返回 null 时快速失败提示配置/安装 dsh；
  * spawn 失败报错返回；端口等待超时报错且不打开；端口被非 dsh 进程占用（无 child 且 httpProbe 不匹配）时报错不打开；
  * stop 无记录实例时仅提示不抛异常；createWebviewPanel 抛错回退 openExternal；
  * 标签页关闭（onDidDispose）仅清面板引用，不触碰子进程；
- * systemBrowser/simpleBrowser 方式不创建/复用面板，无单标签页语义；simpleBrowser 抛错回退 openExternal。
+ * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal。
  *
  * 验收条件：
  * - open 端口未监听时 spawn → 等待端口就绪 → openWebview；已监听时跳过 spawn 直接 openWebview
+ * - debounceMs 窗口内连续 open 只执行第一次（节流）
+ * - multipleTabs=true 时每次 open 新建面板（不复用 panel）
  * - openWith=systemBrowser 时 openWebview 直接 openExternal，不创建面板
  * - openWith=simpleBrowser 时走 simpleBrowser.api.open，抛错回退 openExternal
  * - openWebview 面板存活时 reveal 不新建；端口未监听路径传 reload=true 重设 html
@@ -52,6 +55,8 @@ function createManager(deps) {
   let panel = null; // DSH Web UI 单例标签页（WebviewPanel）
   let stderrTail = '';
   let startedDetached = false; // 启动时记录的独立存活模式，dispose 用它而非关闭时读配置
+  let lastOpenAt = 0; // 防连点节流时间戳
+  const debounceMs = Number.isInteger(deps.debounceMs) && deps.debounceMs >= 0 ? deps.debounceMs : 300;
   const channel =
     typeof vscode.window.createOutputChannel === 'function'
       ? vscode.window.createOutputChannel('DSH')
@@ -118,6 +123,7 @@ function createManager(deps) {
       detached: cfg.get('detached'),
       showWindow: cfg.get('showWindow'),
       openWith: cfg.get('openWith'),
+      multipleTabs: cfg.get('multipleTabs'),
     };
   }
 
@@ -132,6 +138,19 @@ function createManager(deps) {
       // VS Code 内置 Simple Browser（旧版默认打开方式）：每次新建标签页，失败回退系统浏览器
       try {
         await vscode.commands.executeCommand('simpleBrowser.api.open', vscode.Uri.parse(url));
+      } catch (err) {
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+      }
+      return;
+    }
+    if (config.multipleTabs) {
+      // 多标签模式：每次 open 新建独立标签页（共享同一服务端口），不做单例复用
+      try {
+        const p = vscode.window.createWebviewPanel('opendsh.dsh', 'DSH', vscode.ViewColumn.Active, {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+        });
+        p.webview.html = webview.buildWebviewHtml(url);
       } catch (err) {
         await vscode.env.openExternal(vscode.Uri.parse(url));
       }
@@ -161,6 +180,9 @@ function createManager(deps) {
   }
 
   async function open() {
+    const now = Date.now();
+    if (now - lastOpenAt < debounceMs) return; // 防连点：节流窗口内忽略重复触发（多标签模式防误开）
+    lastOpenAt = now;
     const config = detect.resolveConfig(readSettings());
     const port = config.port;
 

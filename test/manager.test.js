@@ -135,7 +135,13 @@ function makeHarness(opts) {
     },
   };
 
-  const manager = createManager({ detect: fakeDetect, process: fakeProc, webview, vscode });
+  const manager = createManager({
+    detect: fakeDetect,
+    process: fakeProc,
+    webview,
+    vscode,
+    debounceMs: opts.debounceMs !== undefined ? opts.debounceMs : 0,
+  });
   return { manager, calls };
 }
 
@@ -435,4 +441,21 @@ test('open recreates panel after tab dispose and keeps server', async () => {
   assert.ok(h.manager.getChild()); // 服务不受影响
   await h.manager.open(); // 再次打开：复用 child，重建面板
   assert.strictEqual(h.calls.panels.length, 2);
+});
+
+test('open throttles rapid re-clicks within debounce window', async () => {
+  const h = makeHarness({ debounceMs: 300 });
+  await h.manager.open();
+  await h.manager.open(); // 节流窗口内第二次触发被忽略
+  assert.strictEqual(h.calls.spawnCount, 1);
+  assert.strictEqual(h.calls.panels.length, 1);
+});
+
+test('open creates separate tabs when multipleTabs is set', async () => {
+  const h = makeHarness({ settings: { multipleTabs: true } });
+  await h.manager.open();
+  await h.manager.open();
+  // 每次 open 新建独立面板（共享同一服务，不重复 spawn）
+  assert.strictEqual(h.calls.panels.length, 2);
+  assert.strictEqual(h.calls.spawnCount, 1);
 });

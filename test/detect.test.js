@@ -29,6 +29,7 @@ test('resolveConfig falls back to defaults on missing/invalid values', () => {
     detached: false,
     showWindow: false,
     openWith: 'tab',
+    multipleTabs: false,
   });
   assert.deepStrictEqual(detect.resolveConfig({ host: '', port: 'abc', dshPath: '  ', patchFile: 5, detached: 'yes', showWindow: 1, openWith: 'bogus' }), {
     host: '127.0.0.1',
@@ -38,6 +39,7 @@ test('resolveConfig falls back to defaults on missing/invalid values', () => {
     detached: false,
     showWindow: false,
     openWith: 'tab',
+    multipleTabs: false,
   });
   assert.strictEqual(detect.resolveConfig({ host: 'localhost', port: '8080' }).port, 8080);
   assert.strictEqual(detect.resolveConfig({ port: 0 }).port, 3080);
@@ -303,4 +305,6 @@ test('resolveConfig passes through detached/showWindow booleans', () => {
   const r = detect.resolveConfig({ detached: true, showWindow: true });
   assert.strictEqual(r.detached, true);
   assert.strictEqual(r.showWindow, true);
+  assert.strictEqual(detect.resolveConfig({ multipleTabs: true }).multipleTabs, true);
+  assert.strictEqual(detect.resolveConfig({}).multipleTabs, false);
 });
