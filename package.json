@@ -36,6 +36,7 @@
     "vscode"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onUri",
     "onCommand:opendsh.open",
     "onCommand:opendsh.stop"
