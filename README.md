@@ -14,9 +14,6 @@
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）的 Web UI
 （打不开时回退到系统浏览器），并能为当前工作区自动启动 / 停止 `dsh web` 服务。
 
-它不是 DSH 的重新实现，也不耦合 DSH 的内部 API —— 它只做一件事：**把官方已经写好的
-Web 客户端，原样搬进编辑器里**。因此它自动继承 Web UI 的全部能力（client 插件、slot、
-主题、GenUI 内联渲染等），同时几乎不承担 DSH 版本演进带来的维护成本。
 
 ## 功能
 
@@ -48,7 +45,7 @@ Web 客户端，原样搬进编辑器里**。因此它自动继承 Web UI 的全
 ## 安装
 
 用 `npx @vscode/vsce package` 打包出 `.vsix` 后安装；或把本目录复制到扩展目录下，命名为
-`TheChengXi.opendsh-0.0.1`，然后重载窗口。
+`TheChengXi.opendsh-0.0.2`，然后重载窗口。
 
 ## 测试
 
@@ -68,11 +65,6 @@ node --test
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) Web UI inside
 VS Code's built-in Simple Browser (falling back to your system browser), and can start /
 stop the `dsh web` server for the current workspace.
-
-It is not a reimplementation of DSH, and it does not couple to DSH's internal APIs — it does
-one thing only: **bring the official Web client into your editor, as-is**. So it inherits the
-full power of the Web UI (client plugins, slots, themes, GenUI inline rendering, …) while
-carrying almost none of the maintenance cost that comes with DSH version changes.
 
 ## Features
 
@@ -100,7 +92,7 @@ carrying almost none of the maintenance cost that comes with DSH version changes
 ## Install
 
 Build a `.vsix` with `npx @vscode/vsce package`, then install it; or copy this folder into
-your extensions directory as `TheChengXi.opendsh-0.0.1` and reload the window.
+your extensions directory as `TheChengXi.opendsh-0.0.2` and reload the window.
 
 ## Test
 
