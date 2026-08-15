@@ -3,13 +3,21 @@
  * 生命周期编排：open/stop。open 端口已监听则直接打开，未监听则自动启动并等待端口就绪后再打开；
  * 已有存活 child 时复用等待，不重复 spawn（启动去重）；持有当前子进程引用，屏蔽 VS Code 交互细节；
  * 启动诊断经 outputChannel 输出，失败弹窗带具体原因。
+ * 打开统一走 webview 单例：面板存活则聚焦（reveal），否则 createWebviewPanel 新建唯一标签页
+ * （iframe 承载 DSH UI，html 由 webview 模块生成）；端口未监听路径（含重启）重设 html 强制重载。
  *
  * 边界：端口未监听且无工作区时报错返回不抛异常；resolveDsh 返回 null 时快速失败提示配置/安装 dsh；
  * spawn 失败报错返回；端口等待超时报错且不打开；端口被非 dsh 进程占用（无 child 且 httpProbe 不匹配）时报错不打开；
- * stop 无记录实例时仅提示不抛异常；打开优先 simpleBrowser.api.open、失败回退 openExternal。
+ * stop 无记录实例时仅提示不抛异常；createWebviewPanel 抛错回退 openExternal；
+ * 标签页关闭（onDidDispose）仅清面板引用，不触碰子进程。
  *
  * 验收条件：
- * - open 端口未监听时 spawn → 等待端口就绪 → open；已监听时跳过 spawn 直接 open
+ * - open 端口未监听时 spawn → 等待端口就绪 → openWebview；已监听时跳过 spawn 直接 openWebview
+ * - openWebview 面板存活时 reveal 不新建；端口未监听路径传 reload=true 重设 html
+ * - onDidDispose 清引用后再次 open 重新创建面板
+ * - createWebviewPanel 抛错时回退 openExternal
+ * - 端口被其他程序占用（无 child 且探测不匹配）报错不打开
+ * - 端口未监听且无工作区时报错且不 spawn
  * - 已有存活 child 再 open：复用 waitForPort，不重复 spawn
  * - 端口被其他程序占用（无 child 且探测不匹配）报错不打开
  * - 端口未监听且无工作区时报错且不 spawn
@@ -32,9 +40,11 @@ const path = require('node:path');
 function createManager(deps) {
   const detect = deps.detect;
   const proc = deps.process;
+  const webview = deps.webview;
   const vscode = deps.vscode;
 
   let child = null;
+  let panel = null; // DSH Web UI 单例标签页（WebviewPanel）
   let stderrTail = '';
   let startedDetached = false; // 启动时记录的独立存活模式，dispose 用它而非关闭时读配置
   const channel =
@@ -105,13 +115,28 @@ function createManager(deps) {
     };
   }
 
-  async function openBrowser(config) {
+  async function openWebview(config, opts) {
     const url = detect.buildUrl(config.host, config.port);
-    const uri = vscode.Uri.parse(url);
+    if (panel) {
+      // 单例标签页已存在：reload=true（服务曾停止/重启）时重设 html 强制刷新，否则仅聚焦
+      if (opts && opts.reload) {
+        panel.webview.html = webview.buildWebviewHtml(url);
+        log('webview reloaded');
+      }
+      panel.reveal(vscode.ViewColumn.Active, false);
+      return;
+    }
     try {
-      await vscode.commands.executeCommand('simpleBrowser.api.open', uri);
+      panel = vscode.window.createWebviewPanel('opendsh.dsh', 'DSH', vscode.ViewColumn.Active, {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+      });
+      panel.webview.html = webview.buildWebviewHtml(url);
+      panel.onDidDispose(() => {
+        panel = null; // 关标签页只清引用，服务不受影响
+      });
     } catch (err) {
-      await vscode.env.openExternal(uri);
+      await vscode.env.openExternal(vscode.Uri.parse(url));
     }
   }
 
@@ -123,13 +148,13 @@ function createManager(deps) {
       // 端口已监听：本窗口 child 或外部 dsh → 打开；其他程序占用 → 报错
       if (child && !child.killed) {
         log('port ' + port + ' listening (child pid=' + child.pid + '); opening');
-        await openBrowser(config);
+        await openWebview(config);
         return;
       }
       const isDsh = await proc.httpProbe(config.host, port);
       if (isDsh) {
         log('port ' + port + ' listening (external dsh); opening');
-        await openBrowser(config);
+        await openWebview(config);
       } else {
         log('port ' + port + ' in use by another program; reporting');
         vscode.window.showErrorMessage('DSH: port ' + port + ' is in use by another program.');
@@ -148,7 +173,7 @@ function createManager(deps) {
         );
         return;
       }
-      await openBrowser(config);
+      await openWebview(config, { reload: true });
       return;
     }
 
@@ -209,7 +234,7 @@ function createManager(deps) {
       return;
     }
     log('port ' + port + ' ready; opening');
-    await openBrowser(config);
+    await openWebview(config, { reload: true });
   }
 
   async function stop() {

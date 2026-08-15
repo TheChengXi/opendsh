@@ -3,7 +3,8 @@
  * manager.js 的 node:test 编排测试，注入假 detect/process/vscode 断言决策顺序与边界。
  *
  * 验收条件：node --test 全绿，覆盖 open 自动启动、启动去重复用 child、端口占用归属判定、无工作区报错、
- * resolveDsh null 快速失败、端口超时报错、open 回退、channel 日志、stop 无 child 提示。
+ * resolveDsh null 快速失败、端口超时报错、webview 单例创建/复用 reveal/重启重载/关页重建/创建失败回退、
+ * channel 日志、stop 无 child 提示。
  */
 
 'use strict';
@@ -14,12 +15,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createManager } = require('../src/manager');
+const webview = require('../src/webview');
 
 function makeHarness(opts) {
   opts = opts || {};
   const calls = {
     messages: [],
-    opened: [],
+    panels: [],
     external: [],
     spawned: null,
     spawnCount: 0,
@@ -79,12 +81,7 @@ function makeHarness(opts) {
       workspaceFolders: opts.folders !== undefined ? opts.folders : [{ uri: { fsPath: '/ws' } }],
     },
     Uri: { parse: (u) => u },
-    commands: {
-      executeCommand: async (cmd, uri) => {
-        if (opts.throwOnOpen) throw new Error('no simple browser');
-        calls.opened.push({ cmd, uri });
-      },
-    },
+    ViewColumn: { Active: 1 },
     env: { openExternal: async (uri) => calls.external.push(uri) },
     window: {
       showErrorMessage: (m) => calls.messages.push({ kind: 'error', m }),
@@ -98,10 +95,40 @@ function makeHarness(opts) {
           },
         };
       },
+      createWebviewPanel: (viewType, title, column, options) => {
+        if (opts.throwOnOpen) throw new Error('webview unavailable');
+        const p = {
+          viewType,
+          title,
+          column,
+          options,
+          revealed: 0,
+          htmlSets: [],
+          _dispose: null,
+          webview: {
+            get html() {
+              return p._html;
+            },
+            set html(v) {
+              p._html = v;
+              p.htmlSets.push(v);
+            },
+          },
+          reveal: (col, focus) => {
+            p.revealed++;
+            p.revealArgs = { col, focus };
+          },
+          onDidDispose: (cb) => {
+            p._dispose = cb;
+          },
+        };
+        calls.panels.push(p);
+        return p;
+      },
     },
   };
 
-  const manager = createManager({ detect: fakeDetect, process: fakeProc, vscode });
+  const manager = createManager({ detect: fakeDetect, process: fakeProc, webview, vscode });
   return { manager, calls };
 }
 
@@ -113,7 +140,9 @@ test('open auto-starts when port free', async () => {
   assert.ok(h.calls.waited);
   assert.strictEqual(h.calls.waited.host, '127.0.0.1');
   assert.strictEqual(h.calls.waited.port, 3080);
-  assert.strictEqual(h.calls.opened.length, 1);
+  assert.strictEqual(h.calls.panels.length, 1);
+  assert.strictEqual(h.calls.panels[0].htmlSets.length, 1);
+  assert.ok(h.calls.panels[0].webview.html.includes('frame-src'));
   assert.ok(h.manager.getChild());
 });
 
@@ -129,7 +158,7 @@ test('open skips spawn when port in use', async () => {
   });
   await h.manager.open();
   assert.strictEqual(h.calls.spawned, null);
-  assert.strictEqual(h.calls.opened.length, 1);
+  assert.strictEqual(h.calls.panels.length, 1);
   assert.strictEqual(h.manager.getChild(), null);
 });
 
@@ -146,14 +175,14 @@ test('open opens without workspace when port already in use', async () => {
   });
   await h.manager.open();
   assert.strictEqual(h.calls.spawned, null);
-  assert.strictEqual(h.calls.opened.length, 1);
+  assert.strictEqual(h.calls.panels.length, 1);
 });
 
 test('open shows error when port free and no workspace', async () => {
   const h = makeHarness({ folders: [] });
   await h.manager.open();
   assert.strictEqual(h.calls.spawned, null);
-  assert.strictEqual(h.calls.opened.length, 0);
+  assert.strictEqual(h.calls.panels.length, 0);
   assert.ok(h.calls.messages.some((x) => x.kind === 'error'));
 });
 
@@ -167,15 +196,15 @@ test('open shows error when server fails to start (port timeout)', async () => {
   });
   await h.manager.open();
   assert.ok(h.calls.spawned);
-  assert.strictEqual(h.calls.opened.length, 0);
+  assert.strictEqual(h.calls.panels.length, 0);
   assert.ok(h.calls.messages.some((x) => x.kind === 'error'));
 });
 
-test('open falls back to external browser when simpleBrowser throws', async () => {
+test('open falls back to external browser when createWebviewPanel throws', async () => {
   const h = makeHarness({ throwOnOpen: true });
   await h.manager.open();
   assert.strictEqual(h.calls.external.length, 1);
-  assert.strictEqual(h.calls.opened.length, 0);
+  assert.strictEqual(h.calls.panels.length, 0);
 });
 
 test('stop with no child shows info and does not kill', async () => {
@@ -200,7 +229,10 @@ test('open reuses existing child instead of duplicate spawn', async () => {
   await h.manager.open(); // second must reuse, not spawn
   assert.strictEqual(h.calls.spawnCount, 1);
   assert.ok(h.calls.waitedCount >= 2);
-  assert.strictEqual(h.calls.opened.length, 2);
+  // 单例标签页：第二次 open 复用面板（reload 重设 html + reveal），不新建
+  assert.strictEqual(h.calls.panels.length, 1);
+  assert.strictEqual(h.calls.panels[0].revealed, 1);
+  assert.strictEqual(h.calls.panels[0].htmlSets.length, 2);
 });
 
 test('open reports port occupied by non-dsh program', async () => {
@@ -213,7 +245,7 @@ test('open reports port occupied by non-dsh program', async () => {
   });
   await h.manager.open();
   assert.strictEqual(h.calls.spawnCount, 0);
-  assert.strictEqual(h.calls.opened.length, 0);
+  assert.strictEqual(h.calls.panels.length, 0);
   assert.ok(h.calls.messages.some((x) => x.kind === 'error' && x.m.includes('in use')));
 });
 
@@ -227,7 +259,7 @@ test('open opens when listening port is external dsh', async () => {
   });
   await h.manager.open();
   assert.strictEqual(h.calls.spawnCount, 0);
-  assert.strictEqual(h.calls.opened.length, 1);
+  assert.strictEqual(h.calls.panels.length, 1);
 });
 
 test('open fails fast when resolveDsh returns null', async () => {
@@ -236,7 +268,7 @@ test('open fails fast when resolveDsh returns null', async () => {
   });
   await h.manager.open();
   assert.strictEqual(h.calls.spawnCount, 0);
-  assert.strictEqual(h.calls.opened.length, 0);
+  assert.strictEqual(h.calls.panels.length, 0);
   assert.ok(h.calls.messages.some((x) => x.kind === 'error' && x.m.includes('dsh not found')));
 });
 
@@ -363,4 +395,14 @@ test('open detached uses spawnStandalone and stop kills pseudo child', async () 
   await h.manager.stop();
   assert.strictEqual(h.calls.killed, true);
   assert.strictEqual(h.manager.getChild(), null);
+});
+
+test('open recreates panel after tab dispose and keeps server', async () => {
+  const h = makeHarness();
+  await h.manager.open();
+  assert.strictEqual(h.calls.panels.length, 1);
+  h.calls.panels[0]._dispose(); // 模拟关闭标签页：仅清引用
+  assert.ok(h.manager.getChild()); // 服务不受影响
+  await h.manager.open(); // 再次打开：复用 child，重建面板
+  assert.strictEqual(h.calls.panels.length, 2);
 });

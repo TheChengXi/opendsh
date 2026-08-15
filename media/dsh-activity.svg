@@ -1,0 +1,9 @@
+<!--
+  @intent
+  活动栏 DSH 快捷入口图标：单色大写 D（24x24，fill="currentColor" 跟随主题高亮），
+  evenodd 挖孔成字形，无外框、无额外装饰。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <path fill="currentColor" fill-rule="evenodd"
+    d="M7 3.5H15.5C19.5 3.5 21.5 7 21.5 12C21.5 17 19.5 20.5 15.5 20.5H7A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5ZM9.2 6.5H14C16.6 6.5 18 8.6 18 12C18 15.4 16.6 17.5 14 17.5H9.2V6.5Z"/>
+</svg>
