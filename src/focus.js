@@ -1,118 +1,116 @@
 /**
  * @intent
- * 聚焦打开模式的承载面编排：openWith=focus 时由 manager 委托本模块，同时维护两个独立承载面——
- * ① VS Code 侧栏对话视图（webview view，iframe 指向 ?focus=conversation 消息流，不含输入区与 DSH 大侧栏）；
- * ② 主编辑区输入 webview（createWebviewPanel，iframe 指向 ?focus=composer 输入区，不含消息流）。
- * 两个 URL 由 detect.buildFocusUrls 按统一契约组装；本模块只负责承载面的注册/复用/清理，不管理 dsh 服务进程
- * （服务生命周期仍归 manager）。侧栏 provider 仅在首次 open 时注册一次，后续复用；主编辑区 panel 存活则 reveal。
+ * 聚焦打开模式的承载面编排：openWith=focus 时由 manager 委托本模块，创建/复用三个 WebviewPanel 承载面——
+ * ① 会话选择区（?focus=sidebar 会话列表）；② 消息流（?focus=conversation.session）；
+ * ③ 输入区（?focus=conversation.composer）。主编辑区承载，用户可拖拽分栏把 AI 对话放到代码旁边。
+ * 三个 URL 由 detect.buildFocusUrls 按统一契约组装（sessions/conversation/composer 三值）；本模块只负责承载面的
+ * 创建/复用/清理，不管理 dsh 服务进程（服务生命周期仍归 manager）。
+ * 承载面由 VIEW_SPECS 描述表驱动：viewId + buildFocusUrls 的 key + panel 标题。
+ * 采用 WebviewPanel 而非 WebviewView：VS Code 当前版本的 WebviewView（侧边栏/面板容器）内 iframe 加载外部 http
+ * 会被透明化（VS Code 环境限制，见 issue #277136 同类问题），WebviewPanel 的 iframe 加载已验证正常。
  *
  * 边界：config 由调用方（manager 经 detect.resolveConfig）注入，本模块不校验 host/port/openWith；
  * detect 缺 buildFocusUrls 时立即抛错（契约缺失是装配错误，不允许静默）；
- * 创建主区 panel 抛错时不回退（由 manager 捕获后 openExternal）；侧栏 provider 注册仅做一次；
+ * panel 存活则复用（reveal + 重写 html 反映最新 URL），关闭（onDidDispose）后清引用、下次 open 重建；
  * reset() 仅清承载面引用，不影响服务进程。
  *
  * 验收条件：
- * - open 首次调用注册侧栏对话 provider 并创建主编辑区输入 panel，两处 html 分别含 ?focus=conversation / ?focus=composer
- * - 再次 open 复用已注册 provider 与存活 panel（reveal），不重复注册/新建
- * - panel 关闭（onDidDispose）后再次 open 重建 panel
+ * - open 按 VIEW_SPECS 创建/复用三个 WebviewPanel，html 含对应聚焦 URL
+ * - 再次 open 复用存活 panel（不重复创建），关闭后再次 open 重建
+ * - open 每次按当前 config 重建聚焦 URL（webviewHost 用于 webview 访问，服务管理 host 分离）
  * - stop/clean 调用 reset 清引用，不触碰服务
- * - 主区 panel 关闭、服务保持运行时 reset 不清服务引用
  */
 
 'use strict';
 
-const FOCUS_CHAT_VIEW_ID = 'opendsh.dsh-chat';
-const FOCUS_INPUT_PANEL_ID = 'opendsh.dsh-focus-input';
-const FOCUS_CONTAINER_CMD = 'workbench.view.extension.opendsh';
-const FOCUS_VIEW_FOCUS_CMD = 'opendsh.dsh-chat.focus';
+// panel viewType（WebviewPanel 的 viewType 无需在 package.json 声明，仅作内部标识）
+const FOCUS_SESSIONS_VIEW_ID = 'opendsh.dsh-sessions'; // 会话选择区
+const FOCUS_CONVERSATION_VIEW_ID = 'opendsh.dsh-conversation'; // 消息流
+const FOCUS_INPUT_VIEW_ID = 'opendsh.dsh-input'; // 输入区
+
+// 承载面描述表：viewId（创建/复用）→ buildFocusUrls 的 key（URL 组装）→ panel 标题 → 所属编辑器组（列）
+// 布局：上下分栏——上方组放会话列表 + 消息流（标签页），下方组放输入区（横贯底部，视觉=底部面板）
+const VIEW_SPECS = [
+  { viewId: FOCUS_SESSIONS_VIEW_ID, urlKey: 'sessions', title: 'DSH Sessions', column: 'One' },
+  { viewId: FOCUS_CONVERSATION_VIEW_ID, urlKey: 'conversation', title: 'DSH Conversation', column: 'One' },
+  { viewId: FOCUS_INPUT_VIEW_ID, urlKey: 'composer', title: 'DSH Input', column: 'Two' },
+];
 
 function createFocus(deps) {
   const detect = deps.detect;
   const webview = deps.webview;
   const vscode = deps.vscode;
 
-  let providerRegistered = false;
-  let sideView = null; // 最近一次 resolved 的侧栏对话 WebviewView
-  let panel = null; // 主编辑区输入 WebviewPanel
-  let urls = null; // { conversation, composer } 聚焦 URL
+  let panels = new Map(); // viewId -> WebviewPanel（存活时复用，关闭后删除）
+  let urls = null; // { sessions, conversation, composer } 聚焦 URL（open 时按 config 重建）
 
-  function getUrls(config) {
+  // 当前聚焦 URL：open 已重建则复用；否则从当前 opendsh 配置实时读 webviewHost/port 构建
+  function currentUrls() {
     if (!urls) {
-      urls = detect.buildFocusUrls(config.host, config.port);
+      const cfg = vscode.workspace.getConfiguration('opendsh');
+      const host = typeof cfg.get('host') === 'string' && cfg.get('host') !== '' ? cfg.get('host') : '127.0.0.1';
+      const webviewHost = typeof cfg.get('webviewHost') === 'string' && cfg.get('webviewHost') !== '' ? cfg.get('webviewHost') : host;
+      const port = Number.isInteger(cfg.get('port')) ? cfg.get('port') : 3080;
+      urls = detect.buildFocusUrls(webviewHost, port);
     }
     return urls;
   }
 
-  // 侧栏对话视图 provider：resolve 时把最新聚焦 URL 写进其 webview；provider 懒启动，DSH 界面由用户展开或 open 触发。
-  function ensureSideProvider(config) {
-    if (providerRegistered) return;
-    const current = getUrls(config);
-    const provider = {
-      resolveWebviewView(webviewView) {
-        sideView = webviewView;
-        webviewView.webview.html = webview.buildWebviewHtml(current.conversation);
-      },
-      onDidChangeVisibility() {},
-      onDidDispose() {
-        sideView = null;
-      },
-    };
-    vscode.window.registerWebviewViewProvider(FOCUS_CHAT_VIEW_ID, provider, {
-      webviewOptions: { enableScripts: true, retainContextWhenHidden: true },
+  // 设置编辑器布局为上下分栏：上方 70%（代码/消息流），下方 30%（输入区，横贯底部）。
+  function applyLayout() {
+    if (typeof vscode.commands.executeCommand !== 'function') return;
+    vscode.commands.executeCommand('vscode.setEditorLayout', {
+      orientation: 1, // 1 = 纵向（上下分栏）
+      groups: [
+        { size: 0.7, groups: [] },
+        { size: 0.3, groups: [] },
+      ],
     });
-    providerRegistered = true;
   }
 
-  // 尝试打开/聚焦侧栏对话容器（VS Code 命令触发，不阻塞 open 主流程；命令缺失时静默忽略）。
-  function revealSideView() {
-    const cmds = [FOCUS_CONTAINER_CMD, FOCUS_VIEW_FOCUS_CMD];
-    for (const cmd of cmds) {
-      if (typeof vscode.commands.executeCommand === 'function') {
-        try {
-          const p = vscode.commands.executeCommand(cmd);
-          if (p && typeof p.then === 'function') p.then(() => {}, () => {});
-        } catch (err) {
-          // 命令不存在或超时：不中断 open，留待用户手动展开侧栏视图
-        }
+  // 创建/复用全部承载面板，html 反映最新聚焦 URL；panel 关闭后下次 open 重建。
+  function ensurePanels() {
+    const current = urls;
+    for (const spec of VIEW_SPECS) {
+      let panel = panels.get(spec.viewId);
+      if (!panel) {
+        panel = vscode.window.createWebviewPanel(spec.viewId, spec.title, vscode.ViewColumn[spec.column], {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+        });
+        panel.onDidDispose(() => {
+          panels.delete(spec.viewId);
+        });
+        panels.set(spec.viewId, panel);
       }
+      panel.webview.html = webview.buildWebviewHtml(current[spec.urlKey]);
+      panel.reveal(vscode.ViewColumn[spec.column], false);
     }
-  }
-
-  function openMainPanel(config) {
-    if (panel) {
-      panel.reveal(vscode.ViewColumn.Active, false);
-      return;
-    }
-    panel = vscode.window.createWebviewPanel(
-      FOCUS_INPUT_PANEL_ID,
-      'DSH Input',
-      vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true }
-    );
-    panel.webview.html = webview.buildWebviewHtml(getUrls(config).composer);
-    panel.onDidDispose(() => {
-      panel = null; // 关主区输入标签页只清引用，服务不受影响
-    });
   }
 
   function open(config) {
-    ensureSideProvider(config);
-    openMainPanel(config);
-    revealSideView();
+    urls = detect.buildFocusUrls(config.webviewHost, config.port); // 每次 open 按当前配置重建
+    applyLayout();
+    ensurePanels();
   }
 
-  // 关闭/停止时清承载面引用（不触碰 dsh 服务进程）。存在未关闭的 panel/视图时由 VS Code 自行回收。
+  // 关闭/停止时清承载面引用（不触碰 dsh 服务进程）。存在未关闭的 panel 时由 VS Code 自行回收。
   function reset() {
-    panel = null;
-    sideView = null;
+    panels.clear();
     urls = null;
   }
 
   return {
     open,
     reset,
-    getState: () => ({ sideView: !!sideView, panel: !!panel, urls }),
+    getState: () => ({ panels: panels.size, urls }),
   };
 }
 
-module.exports = { createFocus, FOCUS_CHAT_VIEW_ID, FOCUS_INPUT_PANEL_ID };
+module.exports = {
+  createFocus,
+  VIEW_SPECS,
+  FOCUS_SESSIONS_VIEW_ID,
+  FOCUS_CONVERSATION_VIEW_ID,
+  FOCUS_INPUT_VIEW_ID,
+};

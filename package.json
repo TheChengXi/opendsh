@@ -2,7 +2,7 @@
   "name": "opendsh",
   "displayName": "Open DSH",
   "description": "Open the DeepSeek Harness Web UI inside VS Code. One-click editor title and status bar buttons open a single reusable tab; auto-starts the dsh web server for the current workspace, with a one-command stop.",
-  "version": "0.0.5",
+  "version": "0.0.21",
   "publisher": "TheChengXi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -19,7 +19,7 @@
     "url": "https://github.com/TheChengXi/opendsh/issues"
   },
   "engines": {
-    "vscode": "^1.70.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "AI",
@@ -37,9 +37,7 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onUri",
-    "onCommand:opendsh.open",
-    "onCommand:opendsh.stop"
+    "onUri"
   ],
   "main": "./extension.js",
   "scripts": {
@@ -53,24 +51,6 @@
           "command": "opendsh.open",
           "group": "navigation",
           "icon": "media/dsh-activity.svg"
-        }
-      ]
-    },
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "opendsh",
-          "title": "DSH",
-          "icon": "media/dsh-activity.svg"
-        }
-      ]
-    },
-    "views": {
-      "opendsh": [
-        {
-          "id": "opendsh.dsh-chat",
-          "name": "DSH Conversation",
-          "when": "opendsh.openWith == 'focus'"
         }
       ]
     },
@@ -93,6 +73,11 @@
           "type": "string",
           "default": "127.0.0.1",
           "description": "Host the DSH web server binds to."
+        },
+        "opendsh.webviewHost": {
+          "type": "string",
+          "default": "",
+          "description": "Host used inside VS Code webviews to reach DSH. Empty means same as opendsh.host. Set it to an alias like 'dsh.local' (mapped to 127.0.0.1 in your hosts file) to bypass VS Code's service-worker interception of localhost requests, which blanks webviews in the side bar / panel. Only affects the webview URL; the server itself still binds to opendsh.host."
         },
         "opendsh.port": {
           "type": "number",
@@ -126,7 +111,12 @@
         },
         "opendsh.openWith": {
           "type": "string",
-          "enum": ["tab", "simpleBrowser", "systemBrowser", "focus"],
+          "enum": [
+            "tab",
+            "simpleBrowser",
+            "systemBrowser",
+            "focus"
+          ],
           "default": "tab",
           "description": "How to open the DSH UI: 'tab' (built-in single reusable tab, default), 'simpleBrowser' (VS Code's built-in Simple Browser, one new tab per open), 'systemBrowser' (your system browser at http://host:port), or 'focus' (focus mode: DSH conversation pinned into the VS Code activity-bar chat view on the side, input/composer kept in a main editor webview, so the editor stays the main view)."
         },

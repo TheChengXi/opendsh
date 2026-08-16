@@ -124,6 +124,7 @@ function createManager(deps) {
     const cfg = vscode.workspace.getConfiguration('opendsh');
     return {
       host: cfg.get('host'),
+      webviewHost: cfg.get('webviewHost'),
       port: cfg.get('port'),
       dshPath: cfg.get('dshPath'),
       patchFile: cfg.get('patchFile'),
@@ -135,7 +136,7 @@ function createManager(deps) {
   }
 
   async function openWebview(config, opts) {
-    const url = detect.buildUrl(config.host, config.port);
+    const url = detect.buildUrl(config.webviewHost, config.port);
     if (config.openWith === 'focus') {
       // 聚焦模式：对话进 VS Code 侧栏 + 输入区留主编辑区，双承载面由 focus 编排器负责。
       // focus 未注入（可选依赖）时回退 tab 单例逻辑（下方），不静默创建残缺承载面。

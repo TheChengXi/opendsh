@@ -29,8 +29,10 @@
   - `"tab"`：内置单例标签页（默认，重复打开只聚焦不新建）
   - `"simpleBrowser"`：VS Code 内置 Simple Browser（每次打开新建标签页，即单标签页改造前的默认方式）
   - `"systemBrowser"`：系统浏览器直接浏览 `http://host:port`（保留地址栏 / DevTools / 扩展等完整浏览器能力）
-  - `"focus"`：聚焦模式——DSH 对话收进 VS Code 活动栏侧栏视图（`opendsh.dsh-chat`），输入区（composer）留在主编辑区
-    webview，主视野留给代码（依赖 DSH 侧聚焦插件按 `?focus=conversation` / `?focus=composer` 渲染对应窗口并隐藏 DSH 大侧栏）
+  - `"focus"`：聚焦模式——三区隔离布局：会话选择区进活动栏侧栏视图（`opendsh.dsh-sessions`）+ 消息流视图
+    （`opendsh.dsh-chat`）、消息流副本进右侧辅助侧边栏（`opendsh.dsh-conversation`）、输入区（composer）进底部面板
+    （`opendsh.dsh-input`），主编辑区完全留给代码（依赖 DSH 侧聚焦插件按 `?focus=sidebar` /
+    `?focus=conversation.session` / `?focus=conversation.composer` 渲染对应窗口并隐藏其余界面）
 - **多标签页（可选）** —— 设置 `opendsh.multipleTabs`（默认 `false`）为 `true` 时，`"tab"` 方式下每次打开都
   新建独立 DSH 标签页（所有标签页共享同一个 dsh 服务端口），适合对照查看；所有打开操作带 300ms 防连点节流，
   避免误触多开。
@@ -109,10 +111,12 @@ and can start / stop the `dsh web` server for the current workspace.
     way before the single-tab change).
   - `"systemBrowser"`: your system browser at `http://host:port` (full browser capabilities:
     address bar, devtools, extensions).
-  - `"focus"`: focus mode — the DSH conversation is pinned into the VS Code activity-bar side
-    view (`opendsh.dsh-chat`) while the input/composer stays in a main editor webview, so the
-    editor remains the main view. (Depends on a DSH-side focus plugin rendering
-    `?focus=conversation` / `?focus=composer` and hiding the DSH main sidebar.)
+  - `"focus"`: focus mode — three-zone layout: the session picker goes to the activity-bar side
+    view (`opendsh.dsh-sessions`) plus a conversation view (`opendsh.dsh-chat`), a conversation
+    copy to the secondary side bar (`opendsh.dsh-conversation`), and the input/composer to the
+    bottom panel (`opendsh.dsh-input`), leaving the editor as the main view. (Depends on a
+    DSH-side focus plugin rendering `?focus=sidebar` / `?focus=conversation.session` /
+    `?focus=conversation.composer` and hiding the rest of the DSH UI.)
 - **Multiple tabs (optional)** — set `opendsh.multipleTabs` (default `false`) to `true` to have
   every open create a separate DSH tab in `"tab"` mode (all tabs share the same dsh server on
   one port), handy for side-by-side views. All open actions are throttled (300ms) to avoid
