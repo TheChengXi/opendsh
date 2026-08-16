@@ -6,34 +6,30 @@
  * 打开统一走 webview 单例：面板存活则聚焦（reveal），否则 createWebviewPanel 新建唯一标签页
  * （iframe 承载 DSH UI，html 由 webview 模块生成）；端口未监听路径（含重启）重设 html 强制重载；
  * 面板创建早于最近一次服务启动（旧页面滞留）时同样强制重设 html（serverStartedAt stale 判断）；
- * 打开方式按 config.openWith 分叉：systemBrowser → openExternal 直开；simpleBrowser → VS Code 内置浏览器
- * （每次新建标签页）；tab（默认）→ webview 单例，multipleTabs=true 时每次新建独立标签页（共享同一服务端口）；
- * focus → 委托注入的 focus 编排器打开「对话进 VS Code 侧栏 + 输入区留主编辑区」双承载面（复用本模块 spawn/起停流程，
- * 仅把"开单页 webview"替换为"开双承载面"，focus 模块不管理服务进程）；
+ * 打开方式按 settings 的 openWith 分叉（薄壳启动器：一切由 settings 决定，无面板、无状态记忆）：
+ * systemBrowser → openExternal 直开；simpleBrowser → VS Code 内置浏览器（每次新建标签页）；
+ * tab（默认）→ webview 单例，multipleTabs=true 时每次新建独立标签页（共享同一服务端口）。
+ * 本模块只负责打开/起停，不承担任何界面聚焦契约（?focus= 由 DSH 侧负责）。
  * open 入口有防连点节流（debounceMs，默认 300ms），窗口内重复触发直接忽略。
  *
  * 边界：端口未监听且无工作区时报错返回不抛异常；resolveDsh 返回 null 时快速失败提示配置/安装 dsh；
  * spawn 失败报错返回；端口等待超时报错且不打开；端口被非 dsh 进程占用（无 child 且 httpProbe 不匹配）时报错不打开；
  * stop 无记录实例时仅提示不抛异常；createWebviewPanel 抛错回退 openExternal；
  * 标签页关闭（onDidDispose）仅清面板引用，不触碰子进程；
- * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal；
- * focus 分支若 focus 编排器未注入（deps 缺 focus）则按 tab 兜底，不静默创建残缺承载面；
- * focus 创建侧栏/主区 webview 抛错时回退 openExternal（与 tab 一致）。
+ * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal。
  *
  * 验收条件：
  * - open 端口未监听时 spawn → 等待端口就绪 → openWebview；已监听时跳过 spawn 直接 openWebview
  * - debounceMs 窗口内连续 open 只执行第一次（节流）
- * - multipleTabs=true 时每次 open 新建面板（不复用 panel）
  * - openWith=systemBrowser 时 openWebview 直接 openExternal，不创建面板
  * - openWith=simpleBrowser 时走 simpleBrowser.api.open，抛错回退 openExternal
+ * - openWith=tab 时走 webview 单例；multipleTabs=true 时每次 open 新建面板（不复用 panel）
  * - openWebview 面板存活时 reveal 不新建；端口未监听路径传 reload=true 重设 html
  * - onDidDispose 清引用后再次 open 重新创建面板
  * - createWebviewPanel 抛错时回退 openExternal
  * - 端口被其他程序占用（无 child 且探测不匹配）报错不打开
  * - 端口未监听且无工作区时报错且不 spawn
  * - 已有存活 child 再 open：复用 waitForPort，不重复 spawn
- * - 端口被其他程序占用（无 child 且探测不匹配）报错不打开
- * - 端口未监听且无工作区时报错且不 spawn
  * - resolveDsh 为 null 时报错且不 spawn
  * - 端口等待超时报错且不 open
  * - 启动日志写入 outputChannel，失败弹窗附 stderr 摘要
@@ -54,7 +50,6 @@ function createManager(deps) {
   const detect = deps.detect;
   const proc = deps.process;
   const webview = deps.webview;
-  const focus = deps.focus; // focus 编排器（openWith=focus 时委托），可选注入
   const vscode = deps.vscode;
 
   let child = null;
@@ -137,25 +132,13 @@ function createManager(deps) {
 
   async function openWebview(config, opts) {
     const url = detect.buildUrl(config.webviewHost, config.port);
-    if (config.openWith === 'focus') {
-      // 聚焦模式：对话进 VS Code 侧栏 + 输入区留主编辑区，双承载面由 focus 编排器负责。
-      // focus 未注入（可选依赖）时回退 tab 单例逻辑（下方），不静默创建残缺承载面。
-      if (focus && typeof focus.open === 'function') {
-        try {
-          await focus.open(config);
-        } catch (err) {
-          await vscode.env.openExternal(vscode.Uri.parse(url));
-        }
-        return;
-      }
-    }
     if (config.openWith === 'systemBrowser') {
       // 系统浏览器直接浏览 http://host:port，绕过内置 webview 封装（完整浏览器能力，适合测试 dsh 自身 UI）
       await vscode.env.openExternal(vscode.Uri.parse(url));
       return;
     }
     if (config.openWith === 'simpleBrowser') {
-      // VS Code 内置 Simple Browser（旧版默认打开方式）：每次新建标签页，失败回退系统浏览器
+      // VS Code 内置 Simple Browser：每次新建标签页，失败回退系统浏览器
       try {
         await vscode.commands.executeCommand('simpleBrowser.api.open', vscode.Uri.parse(url));
       } catch (err) {
@@ -206,28 +189,33 @@ function createManager(deps) {
     const now = Date.now();
     if (now - lastOpenAt < debounceMs) return; // 防连点：节流窗口内忽略重复触发（多标签模式防误开）
     lastOpenAt = now;
-    const config = detect.resolveConfig(readSettings());
-    const port = config.port;
+    const config = detect.resolveConfig(readSettings()); // 打开方式完全由 settings 决定（薄壳）
+    const r = await ensureReady(config);
+    if (r.ready) {
+      await openWebview(config, r.reload ? { reload: true } : undefined);
+    }
+  }
 
+  // 确保 dsh 服务就绪。返回 { ready, reload }：
+  // ready=false 表示已弹错（端口占用/无工作区/dsh 缺失/启动失败/超时），调用方不再打开；
+  // reload=true 表示服务刚启动或刚复用（新 spawn / 复用 child），打开时需重设 html 强制刷新。
+  async function ensureReady(config) {
+    const port = config.port;
     if (await proc.isPortInUse(config.host, port)) {
-      // 端口已监听：本窗口 child 或外部 dsh → 打开；其他程序占用 → 报错
       if (child && !child.killed) {
         log('port ' + port + ' listening (child pid=' + child.pid + '); opening');
-        await openWebview(config);
-        return;
+        return { ready: true, reload: false };
       }
       const isDsh = await proc.httpProbe(config.host, port);
       if (isDsh) {
         log('port ' + port + ' listening (external dsh); opening');
-        await openWebview(config);
-      } else {
-        log('port ' + port + ' in use by another program; reporting');
-        vscode.window.showErrorMessage('DSH: port ' + port + ' is in use by another program.');
+        return { ready: true, reload: false };
       }
-      return;
+      log('port ' + port + ' in use by another program; reporting');
+      vscode.window.showErrorMessage('DSH: port ' + port + ' is in use by another program.');
+      return { ready: false, reload: false };
     }
 
-    // 端口空闲但已有本窗口 child 在启动中：复用等待，不重复 spawn
     if (child && !child.killed) {
       log('child pid=' + child.pid + ' starting; reusing (no duplicate spawn)');
       const ready = await proc.waitForPort(config.host, port);
@@ -236,16 +224,15 @@ function createManager(deps) {
         vscode.window.showErrorMessage(
           'DSH: server did not start (port not listening).' + (tail ? '\n' + tail.slice(-300) : '')
         );
-        return;
+        return { ready: false, reload: false };
       }
-      await openWebview(config, { reload: true });
-      return;
+      return { ready: true, reload: true };
     }
 
     const workspace = detect.resolveWorkspace(vscode.workspace.workspaceFolders);
     if (!workspace) {
       vscode.window.showErrorMessage('DSH: open a workspace folder first.');
-      return;
+      return { ready: false, reload: false };
     }
     const patches = detect.resolvePatches(config, workspace);
     const resolved = await detect.resolveDsh(config);
@@ -254,7 +241,7 @@ function createManager(deps) {
       vscode.window.showErrorMessage(
         'DSH: dsh not found. Install globally (npm i -g @deepseek-ai/dsh) or set opendsh.dshPath.'
       );
-      return;
+      return { ready: false, reload: false };
     }
     log(
       'spawning: ' +
@@ -286,7 +273,7 @@ function createManager(deps) {
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       vscode.window.showErrorMessage('DSH: failed to start: ' + msg);
-      return;
+      return { ready: false, reload: false };
     }
     attachStderr(child);
     writePidFile(workspace, child.pid);
@@ -297,14 +284,13 @@ function createManager(deps) {
       vscode.window.showErrorMessage(
         'DSH: server did not start (port not listening).' + (tail ? '\n' + tail.slice(-300) : '')
       );
-      return;
+      return { ready: false, reload: false };
     }
     log('port ' + port + ' ready; opening');
-    await openWebview(config, { reload: true });
+    return { ready: true, reload: true };
   }
 
   async function stop() {
-    if (focus && typeof focus.reset === 'function') focus.reset(); // 聚焦承载面随服务停止清引用
     const workspace = detect.resolveWorkspace(vscode.workspace.workspaceFolders);
     if (child) {
       const stopped = await proc.killDsh(child);
@@ -348,12 +334,8 @@ function createManager(deps) {
   }
 
   async function dispose() {
-    if (!child) {
-      if (focus && typeof focus.reset === 'function') focus.reset(); // 无 child 时也清聚焦承载面引用
-      return;
-    }
+    if (!child) return;
     if (startedDetached) return; // 启动时为独立存活模式：不随编辑器关闭终止服务
-    if (focus && typeof focus.reset === 'function') focus.reset();
     const c = child;
     child = null;
     stderrTail = '';

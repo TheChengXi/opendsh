@@ -2,18 +2,16 @@ packageName: opendsh
 summary: |
   VS Code 扩展：在编辑器内打开 DeepSeek Harness Web UI，一键起停 dsh web 服务。
   入口 extension.js，业务分三层 src/{manager,detect,process,webview}.js，单测 test/，零第三方依赖。
+  薄壳启动器——不承担任何界面聚焦契约（?focus= 由 DSH 侧负责），打开方式完全由 settings 决定。
   移除 npx 兜底、启动去重、Output 诊断、静默/窗口可配置、
   Windows 独立存活经 WMI 脱离 VS Code 进程树（detached=true）。
   双快捷入口——标题栏按钮（大写 D，contributes.menus.editor/title 声明，
   随标签栏显示）与状态栏按钮（代码注册，常驻可见，无标签页也能启动），点击均直接执行 opendsh.open；
   打开方式改为 webview 单例标签页（重复打开只聚焦不新建，关页不停服务）；
   启动自启（opendsh.autoStart 布尔设置，默认 true，onStartupFinished 激活后自动 open）；
-  打开方式四选一（opendsh.openWith：tab 单例标签页 / simpleBrowser 内置浏览器 / systemBrowser 系统浏览器
-  / focus 聚焦模式——三个 WebviewPanel 主编辑区承载（会话列表 / 消息流 / 输入区），
-  经 ?focus=sidebar / ?focus=conversation.session / ?focus=conversation.composer 三值 URL 契约对接
-  DSH 侧聚焦插件，上下分栏布局（上方 70% 会话列表+消息流、下方 30% 输入区横贯底部）；
-  focus 的实际界面隔离由独立交付物 @dsh-focus/focus-plugin 提供——DSH client 插件（纯 CSS 隐藏方案），
-  安装于 ~/.dsh/profiles/node_modules/@dsh-focus/focus-plugin，经 .dsh/dsh.mcp.patch.yml 挂载；
+  打开方式三选一（opendsh.openWith：tab 单例标签页 / simpleBrowser 内置浏览器 / systemBrowser 系统浏览器），
+  纯 settings 决定，无面板、无状态记忆；
+  聚焦模式与活动栏面板已移除（focus.js / buildFocusUrls / viewsContainers 均删除）；
   host/webviewHost 分离——host 用于 dsh 服务绑定与检测，webviewHost 仅用于 webview 内访问 URL
   （默认同 host，可设别名绕开 VS Code 对 localhost 的 service-worker 拦截）；
   多标签开放（opendsh.multipleTabs，默认 false，仅 tab 模式，每次打开新建标签页共享同一端口）；
@@ -27,26 +25,22 @@ groups:
     summary: 命令/深链/标题栏与状态栏入口 + 生命周期编排 + 自动检索 + 跨平台进程 + webview 承载，
       共同构成「打开 + 起停」能力；manager 负责启动去重、pid 持久化（.dsh/opendsh.pid）、
       webview 单例标签页（复用/重载/关页清引用）与关闭钩子（deactivate→dispose）；
-      openWith=focus 时 manager 委托 focus 编排器打开「会话列表 + 消息流 + 输入区」三个 WebviewPanel
-      （上下分栏布局，WebviewPanel 而非 WebviewView——后者 iframe 加载外部 http 会被 VS Code 透明化）
+      打开方式按 settings.openWith 分叉（tab/simpleBrowser/systemBrowser），无面板/无聚焦承载
     files:
       - extension.js
       - src/manager.js
       - src/detect.js
-      - src/focus.js
       - src/process.js
       - src/webview.js
       - media/dsh-activity.svg
   - name: 单元测试
-    summary: node:test 覆盖 detect/process/manager/webview/focus 五个模块（含 npm 全局定位、WMI 独立启动、
-      pid 残留停止、webview 单例创建/复用/重载/关页重建/创建失败回退、
-      focus 三 panel 创建/复用/重建/reset/上下分栏布局/webviewHost 分离）
+    summary: node:test 覆盖 detect/process/manager/webview 四个模块（含 npm 全局定位、WMI 独立启动、
+      pid 残留停止、webview 单例创建/复用/重载/关页重建/创建失败回退、打开方式分叉）
     files:
       - test/detect.test.js
       - test/process.test.js
       - test/manager.test.js
       - test/webview.test.js
-      - test/focus.test.js
   - name: 运维补丁与发布辅助
     summary: 非运行时资产——DSH Windows 子进程窗口补丁脚本（幂等、可重跑）、上游 issue 草案与 .vscodeignore
       打包排除规则，便于本机修复 DSH 弹窗、发布 vsix 后维护；不入 vsix 包。

@@ -4,7 +4,8 @@
  *
  * 验收条件：node --test 全绿，覆盖 open 自动启动、启动去重复用 child、端口占用归属判定、无工作区报错、
  * resolveDsh null 快速失败、端口超时报错、webview 单例创建/复用 reveal/重启重载/关页重建/创建失败回退、
- * channel 日志、stop 无 child 提示。
+ * 打开方式分叉（systemBrowser/simpleBrowser/multipleTabs/tab）、channel 日志、stop 无 child 提示、
+ * pid 文件读写、detached 独立存活。
  */
 
 'use strict';
@@ -140,17 +141,6 @@ function makeHarness(opts) {
     process: fakeProc,
     webview,
     vscode,
-    focus:
-      opts.focus !== undefined
-        ? opts.focus
-        : {
-            open: async () => {
-              calls.focusOpen = (calls.focusOpen || 0) + 1;
-            },
-            reset: () => {
-              calls.focusReset = (calls.focusReset || 0) + 1;
-            },
-          },
     debounceMs: opts.debounceMs !== undefined ? opts.debounceMs : 0,
   });
   return { manager, calls };
@@ -483,48 +473,4 @@ test('open creates separate tabs when multipleTabs is set', async () => {
   // 每次 open 新建独立面板（共享同一服务，不重复 spawn）
   assert.strictEqual(h.calls.panels.length, 2);
   assert.strictEqual(h.calls.spawnCount, 1);
-});
-
-test('open delegates to focus orchestrator when openWith is focus', async () => {
-  const h = makeHarness({ settings: { openWith: 'focus' } });
-  await h.manager.open();
-  // focus 分支委托 focus.open，不建普通 panel、不 openExternal
-  assert.strictEqual(h.calls.focusOpen, 1);
-  assert.strictEqual(h.calls.panels.length, 0);
-  assert.strictEqual(h.calls.external.length, 0);
-  // 服务流程照常：spawn + waitForPort 仍执行
-  assert.ok(h.calls.spawned);
-  assert.ok(h.calls.waited);
-});
-
-test('open falls back to tab when focus orchestrator missing and openWith is focus', async () => {
-  const h = makeHarness({ settings: { openWith: 'focus' }, focus: null });
-  await h.manager.open();
-  // focus 为 null：focus 分支跳过，回退到 tab 单例逻辑建 panel
-  assert.strictEqual(h.calls.panels.length, 1);
-  assert.strictEqual(h.calls.external.length, 0);
-});
-
-test('open falls back to external browser when focus.open throws', async () => {
-  const h = makeHarness({
-    settings: { openWith: 'focus' },
-    focus: {
-      open: async () => {
-        throw new Error('focus unavailable');
-      },
-      reset: () => {},
-    },
-  });
-  await h.manager.open();
-  assert.strictEqual(h.calls.external.length, 1);
-  assert.strictEqual(h.calls.panels.length, 0);
-});
-
-test('stop and dispose trigger focus.reset', async () => {
-  const h = makeHarness();
-  await h.manager.open();
-  await h.manager.stop();
-  assert.strictEqual(h.calls.focusReset, 1);
-  await h.manager.dispose();
-  assert.strictEqual(h.calls.focusReset, 2);
 });

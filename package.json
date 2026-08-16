@@ -2,7 +2,7 @@
   "name": "opendsh",
   "displayName": "Open DSH",
   "description": "Open the DeepSeek Harness Web UI inside VS Code. One-click editor title and status bar buttons open a single reusable tab; auto-starts the dsh web server for the current workspace, with a one-command stop.",
-  "version": "0.0.21",
+  "version": "0.0.24",
   "publisher": "TheChengXi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -114,11 +114,10 @@
           "enum": [
             "tab",
             "simpleBrowser",
-            "systemBrowser",
-            "focus"
+            "systemBrowser"
           ],
           "default": "tab",
-          "description": "How to open the DSH UI: 'tab' (built-in single reusable tab, default), 'simpleBrowser' (VS Code's built-in Simple Browser, one new tab per open), 'systemBrowser' (your system browser at http://host:port), or 'focus' (focus mode: DSH conversation pinned into the VS Code activity-bar chat view on the side, input/composer kept in a main editor webview, so the editor stays the main view)."
+          "description": "Default way to open the DSH UI (used only as the initial value; the activity-bar panel switches this at runtime and remembers it): 'tab' (built-in single reusable tab, default), 'simpleBrowser' (VS Code's built-in Simple Browser, one new tab per open), 'systemBrowser' (your system browser at http://host:port)."
         },
         "opendsh.multipleTabs": {
           "type": "boolean",

@@ -2,22 +2,18 @@
  * @intent
  * 把「自动检索」收敛为纯函数：解析设置、定位工作区、发现 MCP patch、解析 dsh 可执行、组装打开 URL。
  * dsh 定位优先级 = dshPath 设置 > npm 全局安装真实入口（node + bin.js）> PATH；全部落空返回 null 快速失败，绝不进入 npx 慢路径。
- * 聚焦打开方式（openWith=focus）由本模块合法化，并负责把 base URL 拆出「会话列表 / 消息流 / 输入区」三个聚焦 URL，
- * 作为 opendsh 与 DSH 聚焦插件之间的 URL 参数契约（?focus=sidebar / ?focus=conversation.session / ?focus=conversation.composer）。
+ * 本扩展是薄壳启动器：打开方式仅 openWith 三值（tab/simpleBrowser/systemBrowser），由打开入口据此分叉；
+ * URL 组装只有 buildUrl（http://host:port），不承担 ?focus= 等任何界面聚焦契约。
  *
  * 边界：任何检索失败都不抛异常——无工作区返回 null、无 patch 目录返回空数组、非法/缺失端口回退 3080、
  * 找不到 dsh 返回 null 由 manager 报错；resolveNpmGlobal 先走 APPDATA\npm 同步快速路径（零开销），
  * 未命中再经注入的 execFile 跑 npm prefix -g（模块级缓存）；node 路径经 resolveNode 探测——
  * execPath 本身是 node 才直接复用，否则回退 PATH/常见安装位/命令名（VS Code 扩展 host 的 execPath 是 Code.exe，不可作 node）；
- * 代码内无 URL 字面量，地址由 buildUrl/buildFocusUrls 组装；
- * buildFocusUrls 仅接受合法 host/port，输出 { sessions, conversation, composer } 三个同源 URL。
+ * 代码内无 URL 字面量，地址由 buildUrl 组装。
  *
  * 验收条件：
  * - resolveConfig 对缺失/非法 host/port 回退默认 127.0.0.1/3080，detached/showWindow/multipleTabs 非 true 一律回退 false，
- *   openWith 接受 tab/simpleBrowser/systemBrowser/focus（其余回退 tab）
- * - buildFocusUrls(host, port) 返回 { sessions, conversation, composer }，各含 ?focus= 参数且同源同端口
- *   （sessions→?focus=sidebar、conversation→?focus=conversation.session、composer→?focus=conversation.composer）
- * - buildFocusUrls 不抛异常，非法 host/port 时同样能拼出合法 URL 字符串
+ *   openWith 接受 tab/simpleBrowser/systemBrowser（其余回退 tab，含旧 focus 值）
  * - resolvePatches 无 patch 目录返回 []，有则按文件名排序返回绝对路径，显式 patchFile 优先
  * - resolveDsh 优先级 = dshPath > npm 全局 > PATH，全部落空返回 null（不再 npx 兜底）
  * - resolveNpmGlobal 命中真实 lib/bin.js 返回 { command: node, prefixArgs: [binPath] }，未命中返回 null
@@ -48,11 +44,11 @@ function resolveConfig(settings) {
   // webview 内访问 DSH 用的主机名：默认同 host；可单独设为别名（如 dsh.local）绕开 VS Code 对 localhost 的 service-worker 拦截，
   // 不影响服务管理（isPortInUse/spawn 仍用 host）
   const webviewHost = typeof s.webviewHost === 'string' && s.webviewHost.trim() !== '' ? s.webviewHost.trim() : host;
-  // 打开方式四选一：tab（内置单例标签页，默认）/ simpleBrowser（VS Code 内置 Simple Browser）/ systemBrowser（系统浏览器）
-  // / focus（聚焦模式：对话进 VS Code 侧栏 + 输入区留主编辑区）
+  // 打开方式三选一：tab（内置单例标签页，默认）/ simpleBrowser（VS Code 内置 Simple Browser）/ systemBrowser（系统浏览器）
+  // focus（聚焦模式）已移除，旧值回退 tab
   const openWithRaw = typeof s.openWith === 'string' ? s.openWith : 'tab';
   const openWith =
-    openWithRaw === 'simpleBrowser' || openWithRaw === 'systemBrowser' || openWithRaw === 'focus'
+    openWithRaw === 'simpleBrowser' || openWithRaw === 'systemBrowser'
       ? openWithRaw
       : 'tab';
   const multipleTabs = s.multipleTabs === true;
@@ -201,17 +197,6 @@ function buildUrl(host, port) {
   return `http://${host}:${port}`;
 }
 
-// 聚焦模式拆出三个独立承载面的 URL：sessions=会话选择区视图，conversation=消息流视图，composer=输入区视图。
-// 这是 opendsh 与 DSH 聚焦插件之间的 URL 参数契约（DSH 侧按 ?focus= 渲染对应窗口并隐藏其余界面）。
-function buildFocusUrls(host, port) {
-  const base = `http://${host}:${port}`;
-  return {
-    sessions: `${base}/?focus=sidebar`,
-    conversation: `${base}/?focus=conversation.session`,
-    composer: `${base}/?focus=conversation.composer`,
-  };
-}
-
 module.exports = {
   resolveConfig,
   resolveWorkspace,
@@ -222,7 +207,6 @@ module.exports = {
   resolveNpmGlobal,
   resolveDsh,
   buildUrl,
-  buildFocusUrls,
   DEFAULT_HOST,
   DEFAULT_PORT,
 };

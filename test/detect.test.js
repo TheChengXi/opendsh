@@ -4,7 +4,7 @@
  * buildUrl、buildFocusUrls（聚焦 URL 契约）。
  *
  * 验收条件：node --test 全绿，覆盖 resolveConfig / resolveWorkspace / resolvePatches / resolveNpmGlobal / resolveDsh /
- * buildUrl / buildFocusUrls（sessions/conversation/composer 三值聚焦 URL 契约）；openWith=focus 为合法枚举，非法值回退 tab。
+ * buildUrl / buildFocusUrls 聚焦契约已移除；openWith 合法值为 tab/simpleBrowser/systemBrowser，focus 与非法值回退 tab。
  */
 
 'use strict';
@@ -61,22 +61,9 @@ test('resolveConfig separates webviewHost from host', () => {
 test('resolveConfig resolves openWith with fallback to tab', () => {
   assert.strictEqual(detect.resolveConfig({ openWith: 'simpleBrowser' }).openWith, 'simpleBrowser');
   assert.strictEqual(detect.resolveConfig({ openWith: 'systemBrowser' }).openWith, 'systemBrowser');
-  assert.strictEqual(detect.resolveConfig({ openWith: 'focus' }).openWith, 'focus');
+  assert.strictEqual(detect.resolveConfig({ openWith: 'focus' }).openWith, 'tab'); // focus 已移除，回退 tab
   assert.strictEqual(detect.resolveConfig({ openWith: 'tab' }).openWith, 'tab');
   assert.strictEqual(detect.resolveConfig({}).openWith, 'tab');
-});
-
-test('buildFocusUrls assembles sessions/conversation/composer focus URLs', () => {
-  const urls = detect.buildFocusUrls('localhost', 8080);
-  assert.strictEqual(urls.sessions, 'http://localhost:8080/?focus=sidebar');
-  assert.strictEqual(urls.conversation, 'http://localhost:8080/?focus=conversation.session');
-  assert.strictEqual(urls.composer, 'http://localhost:8080/?focus=conversation.composer');
-  // 同源同端口，仅参数不同
-  for (const key of ['sessions', 'conversation', 'composer']) {
-    assert.ok(urls[key].startsWith('http://localhost:8080'));
-  }
-  assert.notStrictEqual(urls.sessions, urls.conversation);
-  assert.notStrictEqual(urls.conversation, urls.composer);
 });
 
 test('resolveWorkspace returns first fsPath or null', () => {
