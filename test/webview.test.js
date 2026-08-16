@@ -19,8 +19,8 @@ test('buildWebviewHtml sets iframe src directly with cache-buster', () => {
 });
 
 test('buildWebviewHtml appends cache-buster with & when url already has query', () => {
-  const html = buildWebviewHtml('http://127.0.0.1:3080/?focus=conversation.session', { ts: 456 });
-  assert.ok(html.includes('src="http://127.0.0.1:3080/?focus=conversation.session&t=456"'));
+  const html = buildWebviewHtml('http://127.0.0.1:3080/?view=chat', { ts: 456 });
+  assert.ok(html.includes('src="http://127.0.0.1:3080/?view=chat&t=456"'));
 });
 
 test('buildWebviewHtml falls back to Date.now() when ts is not a positive integer', () => {
@@ -33,10 +33,10 @@ test('buildWebviewHtml falls back to Date.now() when ts is not a positive intege
 });
 
 test('buildWebviewHtml allows target origin in CSP frame-src (query stripped)', () => {
-  const html = buildWebviewHtml('http://127.0.0.1:3080/?focus=sidebar', { ts: 1 });
+  const html = buildWebviewHtml('http://127.0.0.1:3080/?view=sidebar', { ts: 1 });
   // frame-src 用 origin（去 query/fragment），不是带 query 的完整 url
   assert.ok(html.includes('frame-src http://127.0.0.1:3080'));
-  assert.ok(!html.includes('frame-src http://127.0.0.1:3080/?focus'));
+  assert.ok(!html.includes('frame-src http://127.0.0.1:3080/?view'));
 });
 
 test('buildWebviewHtml grants clipboard permissions to iframe', () => {
