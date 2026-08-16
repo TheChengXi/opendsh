@@ -25,10 +25,12 @@
   常驻显示，即使没有任何打开的标签页也能一键启动。
 - **启动自动打开（默认开启）** —— 由设置 `opendsh.autoStart`（默认 `true`）控制：VS Code 启动时
   自动启动 dsh 服务并打开 DSH 标签页，重载 / 重启后标签页自动恢复；设为 `false` 则仅按需打开。
-- **打开方式三选一（可选）** —— 设置 `opendsh.openWith`（默认 `"tab"`）：
+- **打开方式四选一（可选）** —— 设置 `opendsh.openWith`（默认 `"tab"`）：
   - `"tab"`：内置单例标签页（默认，重复打开只聚焦不新建）
   - `"simpleBrowser"`：VS Code 内置 Simple Browser（每次打开新建标签页，即单标签页改造前的默认方式）
   - `"systemBrowser"`：系统浏览器直接浏览 `http://host:port`（保留地址栏 / DevTools / 扩展等完整浏览器能力）
+  - `"focus"`：聚焦模式——DSH 对话收进 VS Code 活动栏侧栏视图（`opendsh.dsh-chat`），输入区（composer）留在主编辑区
+    webview，主视野留给代码（依赖 DSH 侧聚焦插件按 `?focus=conversation` / `?focus=composer` 渲染对应窗口并隐藏 DSH 大侧栏）
 - **多标签页（可选）** —— 设置 `opendsh.multipleTabs`（默认 `false`）为 `true` 时，`"tab"` 方式下每次打开都
   新建独立 DSH 标签页（所有标签页共享同一个 dsh 服务端口），适合对照查看；所有打开操作带 300ms 防连点节流，
   避免误触多开。
@@ -107,6 +109,10 @@ and can start / stop the `dsh web` server for the current workspace.
     way before the single-tab change).
   - `"systemBrowser"`: your system browser at `http://host:port` (full browser capabilities:
     address bar, devtools, extensions).
+  - `"focus"`: focus mode — the DSH conversation is pinned into the VS Code activity-bar side
+    view (`opendsh.dsh-chat`) while the input/composer stays in a main editor webview, so the
+    editor remains the main view. (Depends on a DSH-side focus plugin rendering
+    `?focus=conversation` / `?focus=composer` and hiding the DSH main sidebar.)
 - **Multiple tabs (optional)** — set `opendsh.multipleTabs` (default `false`) to `true` to have
   every open create a separate DSH tab in `"tab"` mode (all tabs share the same dsh server on
   one port), handy for side-by-side views. All open actions are throttled (300ms) to avoid
@@ -138,7 +144,8 @@ and can start / stop the `dsh web` server for the current workspace.
   the DSH tab on startup; `false` opens on demand only.
 - `opendsh.openWith` (default `"tab"`) — how to open the DSH UI: `"tab"` (built-in single
   reusable tab), `"simpleBrowser"` (VS Code's built-in Simple Browser, a new tab per open),
-  or `"systemBrowser"` (system browser at `http://host:port`).
+  `"systemBrowser"` (system browser at `http://host:port`), or `"focus"` (focus mode: DSH
+  conversation in the VS Code activity-bar side view, input/composer in a main editor webview).
 - `opendsh.multipleTabs` (default `false`) — allow multiple DSH tabs (only when
   `opendsh.openWith` is `"tab"`); `true` opens a new tab per open, all sharing one server port.
 

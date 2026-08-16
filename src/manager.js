@@ -5,15 +5,20 @@
  * 启动诊断经 outputChannel 输出，失败弹窗带具体原因。
  * 打开统一走 webview 单例：面板存活则聚焦（reveal），否则 createWebviewPanel 新建唯一标签页
  * （iframe 承载 DSH UI，html 由 webview 模块生成）；端口未监听路径（含重启）重设 html 强制重载；
+ * 面板创建早于最近一次服务启动（旧页面滞留）时同样强制重设 html（serverStartedAt stale 判断）；
  * 打开方式按 config.openWith 分叉：systemBrowser → openExternal 直开；simpleBrowser → VS Code 内置浏览器
  * （每次新建标签页）；tab（默认）→ webview 单例，multipleTabs=true 时每次新建独立标签页（共享同一服务端口）；
+ * focus → 委托注入的 focus 编排器打开「对话进 VS Code 侧栏 + 输入区留主编辑区」双承载面（复用本模块 spawn/起停流程，
+ * 仅把"开单页 webview"替换为"开双承载面"，focus 模块不管理服务进程）；
  * open 入口有防连点节流（debounceMs，默认 300ms），窗口内重复触发直接忽略。
  *
  * 边界：端口未监听且无工作区时报错返回不抛异常；resolveDsh 返回 null 时快速失败提示配置/安装 dsh；
  * spawn 失败报错返回；端口等待超时报错且不打开；端口被非 dsh 进程占用（无 child 且 httpProbe 不匹配）时报错不打开；
  * stop 无记录实例时仅提示不抛异常；createWebviewPanel 抛错回退 openExternal；
  * 标签页关闭（onDidDispose）仅清面板引用，不触碰子进程；
- * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal。
+ * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal；
+ * focus 分支若 focus 编排器未注入（deps 缺 focus）则按 tab 兜底，不静默创建残缺承载面；
+ * focus 创建侧栏/主区 webview 抛错时回退 openExternal（与 tab 一致）。
  *
  * 验收条件：
  * - open 端口未监听时 spawn → 等待端口就绪 → openWebview；已监听时跳过 spawn 直接 openWebview
@@ -49,10 +54,12 @@ function createManager(deps) {
   const detect = deps.detect;
   const proc = deps.process;
   const webview = deps.webview;
+  const focus = deps.focus; // focus 编排器（openWith=focus 时委托），可选注入
   const vscode = deps.vscode;
 
   let child = null;
   let panel = null; // DSH Web UI 单例标签页（WebviewPanel）
+  let serverStartedAt = 0; // 最近一次 spawn 成功的时刻；面板创建早于它 → 面板持有的是旧服务页面，open 时强制刷新
   let stderrTail = '';
   let startedDetached = false; // 启动时记录的独立存活模式，dispose 用它而非关闭时读配置
   let lastOpenAt = 0; // 防连点节流时间戳
@@ -129,6 +136,18 @@ function createManager(deps) {
 
   async function openWebview(config, opts) {
     const url = detect.buildUrl(config.host, config.port);
+    if (config.openWith === 'focus') {
+      // 聚焦模式：对话进 VS Code 侧栏 + 输入区留主编辑区，双承载面由 focus 编排器负责。
+      // focus 未注入（可选依赖）时回退 tab 单例逻辑（下方），不静默创建残缺承载面。
+      if (focus && typeof focus.open === 'function') {
+        try {
+          await focus.open(config);
+        } catch (err) {
+          await vscode.env.openExternal(vscode.Uri.parse(url));
+        }
+        return;
+      }
+    }
     if (config.openWith === 'systemBrowser') {
       // 系统浏览器直接浏览 http://host:port，绕过内置 webview 封装（完整浏览器能力，适合测试 dsh 自身 UI）
       await vscode.env.openExternal(vscode.Uri.parse(url));
@@ -157,8 +176,10 @@ function createManager(deps) {
       return;
     }
     if (panel) {
-      // 单例标签页已存在：reload=true（服务曾停止/重启）时重设 html 强制刷新，否则仅聚焦
-      if (opts && opts.reload) {
+      // 单例标签页已存在：reload=true（服务曾停止/重启）或面板创建早于最近一次服务启动（旧页面滞留）
+      // 时重设 html 强制刷新，否则仅聚焦
+      const stale = serverStartedAt > (panel._createdAt || 0);
+      if ((opts && opts.reload) || stale) {
         panel.webview.html = webview.buildWebviewHtml(url);
         log('webview reloaded');
       }
@@ -170,6 +191,7 @@ function createManager(deps) {
         enableScripts: true,
         retainContextWhenHidden: true,
       });
+      panel._createdAt = Date.now(); // 面板创建时刻，供 server 重启后的 stale 判断
       panel.webview.html = webview.buildWebviewHtml(url);
       panel.onDidDispose(() => {
         panel = null; // 关标签页只清引用，服务不受影响
@@ -259,6 +281,7 @@ function createManager(deps) {
           showWindow: config.showWindow,
         });
       }
+      serverStartedAt = Date.now(); // 服务启动成功即更新标记：已存活面板在下一次 open 时被判定为旧页面并强制刷新
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       vscode.window.showErrorMessage('DSH: failed to start: ' + msg);
@@ -280,6 +303,7 @@ function createManager(deps) {
   }
 
   async function stop() {
+    if (focus && typeof focus.reset === 'function') focus.reset(); // 聚焦承载面随服务停止清引用
     const workspace = detect.resolveWorkspace(vscode.workspace.workspaceFolders);
     if (child) {
       const stopped = await proc.killDsh(child);
@@ -323,8 +347,12 @@ function createManager(deps) {
   }
 
   async function dispose() {
-    if (!child) return;
+    if (!child) {
+      if (focus && typeof focus.reset === 'function') focus.reset(); // 无 child 时也清聚焦承载面引用
+      return;
+    }
     if (startedDetached) return; // 启动时为独立存活模式：不随编辑器关闭终止服务
+    if (focus && typeof focus.reset === 'function') focus.reset();
     const c = child;
     child = null;
     stderrTail = '';

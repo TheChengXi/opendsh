@@ -1,8 +1,10 @@
 /**
  * @intent
- * detect.js 的 node:test 单测，覆盖设置回退、工作区解析、patch 发现、dsh 定位优先级（dshPath > npm 全局 > PATH，落空 null）、buildUrl。
+ * detect.js 的 node:test 单测，覆盖设置回退、工作区解析、patch 发现、dsh 定位优先级（dshPath > npm 全局 > PATH，落空 null）、
+ * buildUrl、buildFocusUrls（聚焦 URL 契约）。
  *
- * 验收条件：node --test 全绿，覆盖 resolveConfig / resolveWorkspace / resolvePatches / resolveNpmGlobal / resolveDsh / buildUrl。
+ * 验收条件：node --test 全绿，覆盖 resolveConfig / resolveWorkspace / resolvePatches / resolveNpmGlobal / resolveDsh /
+ * buildUrl / buildFocusUrls；openWith=focus 为合法枚举，非法值回退 tab。
  */
 
 'use strict';
@@ -49,8 +51,19 @@ test('resolveConfig falls back to defaults on missing/invalid values', () => {
 test('resolveConfig resolves openWith with fallback to tab', () => {
   assert.strictEqual(detect.resolveConfig({ openWith: 'simpleBrowser' }).openWith, 'simpleBrowser');
   assert.strictEqual(detect.resolveConfig({ openWith: 'systemBrowser' }).openWith, 'systemBrowser');
+  assert.strictEqual(detect.resolveConfig({ openWith: 'focus' }).openWith, 'focus');
   assert.strictEqual(detect.resolveConfig({ openWith: 'tab' }).openWith, 'tab');
   assert.strictEqual(detect.resolveConfig({}).openWith, 'tab');
+});
+
+test('buildFocusUrls assembles conversation/composer focus URLs', () => {
+  const urls = detect.buildFocusUrls('localhost', 8080);
+  assert.strictEqual(urls.conversation, 'http://localhost:8080/?focus=conversation');
+  assert.strictEqual(urls.composer, 'http://localhost:8080/?focus=composer');
+  // 同源同端口，仅参数不同
+  assert.ok(urls.conversation.startsWith('http://localhost:8080'));
+  assert.ok(urls.composer.startsWith('http://localhost:8080'));
+  assert.notStrictEqual(urls.conversation, urls.composer);
 });
 
 test('resolveWorkspace returns first fsPath or null', () => {

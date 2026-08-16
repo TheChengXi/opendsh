@@ -140,6 +140,17 @@ function makeHarness(opts) {
     process: fakeProc,
     webview,
     vscode,
+    focus:
+      opts.focus !== undefined
+        ? opts.focus
+        : {
+            open: async () => {
+              calls.focusOpen = (calls.focusOpen || 0) + 1;
+            },
+            reset: () => {
+              calls.focusReset = (calls.focusReset || 0) + 1;
+            },
+          },
     debounceMs: opts.debounceMs !== undefined ? opts.debounceMs : 0,
   });
   return { manager, calls };
@@ -269,6 +280,20 @@ test('open reuses existing child instead of duplicate spawn', async () => {
   assert.strictEqual(h.calls.panels.length, 1);
   assert.strictEqual(h.calls.panels[0].revealed, 1);
   assert.strictEqual(h.calls.panels[0].htmlSets.length, 2);
+});
+
+test('open force-reloads a live panel created before the last server start', async () => {
+  const proc = { isPortInUse: async () => false }; // 可变引用：第一次走 spawn，之后模拟端口已监听
+  const h = makeHarness({ process: proc });
+  await h.manager.open(); // spawn#1 → 创建面板
+  assert.strictEqual(h.calls.spawnCount, 1);
+  const panel = h.calls.panels[0];
+  assert.strictEqual(panel.htmlSets.length, 1);
+  panel._createdAt = 0; // 模拟面板创建早于最近一次服务启动（旧页面滞留）
+  proc.isPortInUse = async () => true; // 第二次 open：端口已监听 + child 存活 → 无 reload 参数
+  await h.manager.open();
+  // stale 判断（serverStartedAt > _createdAt）触发强制重设 html，而非仅聚焦
+  assert.strictEqual(panel.htmlSets.length, 2);
 });
 
 test('open reports port occupied by non-dsh program', async () => {
@@ -458,4 +483,48 @@ test('open creates separate tabs when multipleTabs is set', async () => {
   // 每次 open 新建独立面板（共享同一服务，不重复 spawn）
   assert.strictEqual(h.calls.panels.length, 2);
   assert.strictEqual(h.calls.spawnCount, 1);
+});
+
+test('open delegates to focus orchestrator when openWith is focus', async () => {
+  const h = makeHarness({ settings: { openWith: 'focus' } });
+  await h.manager.open();
+  // focus 分支委托 focus.open，不建普通 panel、不 openExternal
+  assert.strictEqual(h.calls.focusOpen, 1);
+  assert.strictEqual(h.calls.panels.length, 0);
+  assert.strictEqual(h.calls.external.length, 0);
+  // 服务流程照常：spawn + waitForPort 仍执行
+  assert.ok(h.calls.spawned);
+  assert.ok(h.calls.waited);
+});
+
+test('open falls back to tab when focus orchestrator missing and openWith is focus', async () => {
+  const h = makeHarness({ settings: { openWith: 'focus' }, focus: null });
+  await h.manager.open();
+  // focus 为 null：focus 分支跳过，回退到 tab 单例逻辑建 panel
+  assert.strictEqual(h.calls.panels.length, 1);
+  assert.strictEqual(h.calls.external.length, 0);
+});
+
+test('open falls back to external browser when focus.open throws', async () => {
+  const h = makeHarness({
+    settings: { openWith: 'focus' },
+    focus: {
+      open: async () => {
+        throw new Error('focus unavailable');
+      },
+      reset: () => {},
+    },
+  });
+  await h.manager.open();
+  assert.strictEqual(h.calls.external.length, 1);
+  assert.strictEqual(h.calls.panels.length, 0);
+});
+
+test('stop and dispose trigger focus.reset', async () => {
+  const h = makeHarness();
+  await h.manager.open();
+  await h.manager.stop();
+  assert.strictEqual(h.calls.focusReset, 1);
+  await h.manager.dispose();
+  assert.strictEqual(h.calls.focusReset, 2);
 });

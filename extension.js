@@ -5,6 +5,9 @@
  * contributes.menus.editor/title 声明（点击同样执行 opendsh.open），无需代码注册。
  * 启动自启：按 opendsh.autoStart（默认 true）在窗口就绪后自动调用 manager.open()
  * （启动 dsh 服务 + 打开 DSH 标签页），实现重载/重启后标签页自动恢复。
+ * openWith=focus 时，本入口把 focus 编排器（src/focus）作为 deps 注入 manager，由 manager 委托其打开
+ * 「对话进 VS Code 侧栏 + 输入区留主编辑区」双承载面；聚焦聊天视图（opendsh.dsh-chat）由 package.json 的
+ * contributes.viewsContainers/views 声明（运行时由 focus 模块 registerWebviewViewProvider 承载）。
  *
  * 边界：URI 仅处理 /open 路径；状态栏按钮常驻显示（无标签页时也能快捷启动），
  * 标题栏按钮随标签栏显示（有标签页时可用）；
@@ -16,6 +19,7 @@
  * - 创建状态栏按钮（text「DSH」/ command=opendsh.open）并 show
  * - 启动时 autoStart 非 false 则调用 manager.open()
  * - registerUriHandler 将 /open 映射到 manager.open
+ * - 创建 manager 时注入 focus 编排器实例（deps.focus）
  * - deactivate 调用 manager.dispose()（无 manager 时安全返回）
  */
 
@@ -23,6 +27,7 @@
 
 const vscode = require('vscode');
 const { createManager } = require('./src/manager');
+const { createFocus } = require('./src/focus');
 const detect = require('./src/detect');
 const proc = require('./src/process');
 const webview = require('./src/webview');
@@ -30,7 +35,8 @@ const webview = require('./src/webview');
 let manager = null;
 
 function activate(context) {
-  manager = createManager({ detect, process: proc, webview, vscode });
+  const focus = createFocus({ detect, webview, vscode });
+  manager = createManager({ detect, process: proc, webview, focus, vscode });
 
   context.subscriptions.push(vscode.commands.registerCommand('opendsh.open', manager.open));
   context.subscriptions.push(vscode.commands.registerCommand('opendsh.stop', manager.stop));
