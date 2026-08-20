@@ -32,6 +32,8 @@ function buildDshArgs(resolved, opts) {
   args.push('web');
   for (const p of patches) args.push('--patch', p);
   args.push('--host', o.host, '--port', String(o.port));
+  // 禁用 DSH 自动打开浏览器：由 opendsh 扩展控制打开方式，不由 DSH 自身决定
+  args.push('--no-open');
   return args;
 }
 
@@ -45,6 +47,7 @@ function spawnDsh(resolved, opts, spawnFn) {
   const needShell = isWin && /\.(cmd|bat)$/i.test(resolved.command || '');
   // detached 与窗口互斥：DETACHED_PROCESS 无控制台，窗口模式必须非 detached（独立存活由父退子活保证）
   const detached = !showWindow;
+  console.log('[opendsh] spawnDsh: showWindow=' + showWindow + ', detached=' + detached + ', windowsHide=' + (isWin && !showWindow));
   const child = spawn(resolved.command, args, {
     cwd: o.cwd,
     shell: needShell,

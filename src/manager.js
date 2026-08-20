@@ -117,7 +117,7 @@ function createManager(deps) {
 
   function readSettings() {
     const cfg = vscode.workspace.getConfiguration('opendsh');
-    return {
+    const settings = {
       host: cfg.get('host'),
       webviewHost: cfg.get('webviewHost'),
       port: cfg.get('port'),
@@ -128,26 +128,33 @@ function createManager(deps) {
       openWith: cfg.get('openWith'),
       multipleTabs: cfg.get('multipleTabs'),
     };
+    log('readSettings: ' + JSON.stringify(settings));
+    return settings;
   }
 
   async function openWebview(config, opts) {
     const url = detect.buildUrl(config.webviewHost, config.port);
+    log('openWebview: openWith=' + config.openWith + ', multipleTabs=' + config.multipleTabs + ', url=' + url);
     if (config.openWith === 'systemBrowser') {
       // 系统浏览器直接浏览 http://host:port，绕过内置 webview 封装（完整浏览器能力，适合测试 dsh 自身 UI）
+      log('openWebview: opening system browser');
       await vscode.env.openExternal(vscode.Uri.parse(url));
       return;
     }
     if (config.openWith === 'simpleBrowser') {
       // VS Code 内置 Simple Browser：每次新建标签页，失败回退系统浏览器
+      log('openWebview: opening simple browser');
       try {
         await vscode.commands.executeCommand('simpleBrowser.api.open', vscode.Uri.parse(url));
       } catch (err) {
+        log('openWebview: simple browser failed, falling back to system browser');
         await vscode.env.openExternal(vscode.Uri.parse(url));
       }
       return;
     }
     if (config.multipleTabs) {
       // 多标签模式：每次 open 新建独立标签页（共享同一服务端口），不做单例复用
+      log('openWebview: opening multiple tabs');
       try {
         const p = vscode.window.createWebviewPanel('opendsh.dsh', 'DSH', vscode.ViewColumn.Active, {
           enableScripts: true,
@@ -155,6 +162,7 @@ function createManager(deps) {
         });
         p.webview.html = webview.buildWebviewHtml(url);
       } catch (err) {
+        log('openWebview: createWebviewPanel failed, falling back to system browser');
         await vscode.env.openExternal(vscode.Uri.parse(url));
       }
       return;
@@ -171,6 +179,7 @@ function createManager(deps) {
       return;
     }
     try {
+      log('openWebview: creating new webview panel');
       panel = vscode.window.createWebviewPanel('opendsh.dsh', 'DSH', vscode.ViewColumn.Active, {
         enableScripts: true,
         retainContextWhenHidden: true,
@@ -181,6 +190,7 @@ function createManager(deps) {
         panel = null; // 关标签页只清引用，服务不受影响
       });
     } catch (err) {
+      log('openWebview: createWebviewPanel failed, falling back to system browser');
       await vscode.env.openExternal(vscode.Uri.parse(url));
     }
   }
@@ -247,11 +257,13 @@ function createManager(deps) {
       'spawning: ' +
         resolved.command +
         (resolved.prefixArgs && resolved.prefixArgs.length ? ' ' + resolved.prefixArgs.join(' ') : '') +
-        ' web (port ' + port + ')'
+        ' web (port ' + port + ')' +
+        ' showWindow=' + config.showWindow
     );
     try {
       if (config.detached) {
         // 独立存活模式：Windows 经 WMI 脱离 VS Code job（真独立），POSIX 走 detached spawn
+        log('spawning standalone with showWindow=' + config.showWindow);
         const spawned = await proc.spawnStandalone(resolved, {
           host: config.host,
           port,
@@ -261,6 +273,7 @@ function createManager(deps) {
         });
         child = { pid: spawned.pid }; // 伪 child：仅 pid（WMI 进程非本进程子进程，无 stderr/exit 事件）
       } else {
+        log('spawning dsh with showWindow=' + config.showWindow);
         child = proc.spawnDsh(resolved, {
           host: config.host,
           port,

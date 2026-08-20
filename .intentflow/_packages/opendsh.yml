@@ -25,7 +25,9 @@ groups:
     summary: 命令/深链/标题栏与状态栏入口 + 生命周期编排 + 自动检索 + 跨平台进程 + webview 承载，
       共同构成「打开 + 起停」能力；manager 负责启动去重、pid 持久化（.dsh/opendsh.pid）、
       webview 单例标签页（复用/重载/关页清引用）与关闭钩子（deactivate→dispose）；
-      打开方式按 settings.openWith 分叉（tab/simpleBrowser/systemBrowser），无面板/无聚焦承载
+      打开方式按 settings.openWith 分叉（tab/simpleBrowser/systemBrowser），无面板/无聚焦承载；
+      启动参数包含 --no-open 禁用 DSH 自动打开浏览器，由 opendsh 扩展控制打开方式；
+      包含调试日志用于追踪配置读取和执行流程。
     files:
       - extension.js
       - src/manager.js
