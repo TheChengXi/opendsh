@@ -17,6 +17,10 @@
  * stop 无记录实例时仅提示不抛异常；createWebviewPanel 抛错回退 openExternal；
  * 标签页关闭（onDidDispose）仅清面板引用，不触碰子进程；
  * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal。
+ * 五模式启动（单枚举 launch.mode，无优先级叠加）：integrated→createTerminal；window→spawnDshVisible；hidden→spawnDsh 静默；
+ * window-keepalive→spawnStandalone(showWindow=1 弹窗独立)；hidden-keepalive→spawnStandalone(showWindow=0 静默独立)，
+ *  且仅当 windowsHidePatch=true 时先 patch.isApplied 检测、未打则 createTerminal 发送 patch.buildPatchCommand 补丁命令；
+ * integrated（=内置终端）模式存 terminal 引用（无 pid），stop/dispose 关终端停服务，不写 pid 文件。
  *
  * 验收条件：
  * - open 端口未监听时 spawn → 等待端口就绪 → openWebview；已监听时跳过 spawn 直接 openWebview
@@ -34,11 +38,12 @@
  * - 端口等待超时报错且不 open
  * - 启动日志写入 outputChannel，失败弹窗附 stderr 摘要
  * - stop 无 child 时提示且不抛异常
- * - dispose 静默终止 child（不弹消息），无 child 时安全返回；detached=true（独立存活）时不终止
- * - spawn 透传 showWindow 决定窗口/静默模式
- * - 启动成功后写 pid 到 <workspace>/.dsh/opendsh.pid；stop 无 child 时读 pid 文件停止残留服务（经端口/httpProbe 验证防误杀），成功删文件
- * - dispose 杀掉后删 pid 文件；detached 独立模式不删（跨会话 stop 可用）
- * - detached=true 时走 spawnStandalone（Windows WMI 脱离 VS Code job），child 变为 { pid } 伪对象，日志经窗口展示
+ * - dispose 静默终止 child（不弹消息），无 child 时安全返回；keepalive 模式（window-keepalive/hidden-keepalive）时不终止
+ * - 五模式分发：integrated→createTerminal（存 terminal 引用，不写 pid）；window→spawnDshVisible；hidden→spawnDsh 静默；
+ *   window-keepalive→spawnStandalone(showWindow=1 弹窗脱离 VS Code job)；hidden-keepalive→spawnStandalone(showWindow=0 静默)，
+ *   且仅当 windowsHidePatch=true 先 patch.isApplied 检测、未打则 createTerminal 发送 patch.buildPatchCommand 命令
+ * - 启动成功后写 pid 到 <workspace>/.dsh/opendsh.pid（integrated 模式除外）；stop 无 child 时读 pid 文件停止残留服务（经端口/httpProbe 验证防误杀），成功删文件
+ * - dispose 杀掉后删 pid 文件；keepalive 独立模式不删（跨会话 stop 可用）；integrated 模式 dispose 关终端
  */
 
 'use strict';
@@ -50,13 +55,15 @@ function createManager(deps) {
   const detect = deps.detect;
   const proc = deps.process;
   const webview = deps.webview;
+  const patch = deps.patch;
   const vscode = deps.vscode;
 
   let child = null;
+  let terminal = null; // 普通 terminal 模式承载 DSH 的集成终端（无 pid，stop/dispose 关终端停服务）
   let panel = null; // DSH Web UI 单例标签页（WebviewPanel）
   let serverStartedAt = 0; // 最近一次 spawn 成功的时刻；面板创建早于它 → 面板持有的是旧服务页面，open 时强制刷新
   let stderrTail = '';
-  let startedDetached = false; // 启动时记录的独立存活模式，dispose 用它而非关闭时读配置
+  let startedKeepAlive = false; // 启动时记录的独立存活模式（window-keepalive/hidden-keepalive），dispose 用它而非关闭时读配置
   let lastOpenAt = 0; // 防连点节流时间戳
   const debounceMs = Number.isInteger(deps.debounceMs) && deps.debounceMs >= 0 ? deps.debounceMs : 300;
   const channel =
@@ -123,8 +130,8 @@ function createManager(deps) {
       port: cfg.get('port'),
       dshPath: cfg.get('dshPath'),
       patchFile: cfg.get('patchFile'),
-      detached: cfg.get('detached'),
-      showWindow: cfg.get('showWindow'),
+      launchMode: cfg.get('launchMode'),
+      windowsHidePatch: cfg.get('windowsHidePatch'),
       openWith: cfg.get('openWith'),
       multipleTabs: cfg.get('multipleTabs'),
     };
@@ -226,8 +233,8 @@ function createManager(deps) {
       return { ready: false, reload: false };
     }
 
-    if (child && !child.killed) {
-      log('child pid=' + child.pid + ' starting; reusing (no duplicate spawn)');
+    if ((child && !child.killed) || terminal) {
+      log('instance starting; reusing (no duplicate spawn)');
       const ready = await proc.waitForPort(config.host, port);
       if (!ready) {
         const tail = stderrTail.trim();
@@ -258,29 +265,87 @@ function createManager(deps) {
         resolved.command +
         (resolved.prefixArgs && resolved.prefixArgs.length ? ' ' + resolved.prefixArgs.join(' ') : '') +
         ' web (port ' + port + ')' +
-        ' showWindow=' + config.showWindow
+        ' mode=' + config.launchMode
     );
     try {
-      if (config.detached) {
-        // 独立存活模式：Windows 经 WMI 脱离 VS Code job（真独立），POSIX 走 detached spawn
-        log('spawning standalone with showWindow=' + config.showWindow);
-        const spawned = await proc.spawnStandalone(resolved, {
-          host: config.host,
-          port,
-          patches,
-          cwd: workspace,
-          showWindow: config.showWindow,
-        });
-        child = { pid: spawned.pid }; // 伪 child：仅 pid（WMI 进程非本进程子进程，无 stderr/exit 事件）
-      } else {
-        log('spawning dsh with showWindow=' + config.showWindow);
-        child = proc.spawnDsh(resolved, {
-          host: config.host,
-          port,
-          patches,
-          cwd: workspace,
-          showWindow: config.showWindow,
-        });
+      switch (config.launchMode) {
+        case 'integrated': {
+          // 内置终端承载 DSH，无 pid
+          const cmd = proc.buildTerminalCommand(resolved, {
+            host: config.host,
+            port,
+            patches,
+            cwd: workspace,
+          });
+          terminal = vscode.window.createTerminal('DSH');
+          terminal.sendText(cmd);
+          terminal.show();
+          const t = terminal;
+          if (typeof t.onDidClose === 'function') {
+            t.onDidClose(() => {
+              if (terminal === t) terminal = null;
+            });
+          }
+          child = null;
+          break;
+        }
+        case 'window': {
+          // 桌面窗口 + 随关
+          child = proc.spawnDshVisible(resolved, {
+            host: config.host,
+            port,
+            patches,
+            cwd: workspace,
+          });
+          break;
+        }
+        case 'hidden': {
+          // 静默 + 随关
+          child = proc.spawnDsh(resolved, {
+            host: config.host,
+            port,
+            patches,
+            cwd: workspace,
+          });
+          break;
+        }
+        case 'window-keepalive': {
+          // 桌面窗口 + 独立存活：WMI 弹窗脱离 VS Code job
+          const spawned = await proc.spawnStandalone(resolved, {
+            host: config.host,
+            port,
+            patches,
+            cwd: workspace,
+            showWindow: true,
+          });
+          child = { pid: spawned.pid };
+          break;
+        }
+        case 'hidden-keepalive': {
+          // 静默 + 独立存活：先（可选）补丁，再 WMI 静默后台
+          if (config.windowsHidePatch) {
+            if (patch && typeof patch.isApplied === 'function' && !patch.isApplied({})) {
+              const cmd = patch && typeof patch.buildPatchCommand === 'function' ? patch.buildPatchCommand({}) : '';
+              if (cmd) {
+                log('sending patch command to terminal');
+                const pt = vscode.window.createTerminal('DSH patch');
+                pt.sendText(cmd);
+                pt.show();
+              }
+            } else {
+              log('patch applied or unavailable; skipping');
+            }
+          }
+          const spawned = await proc.spawnStandalone(resolved, {
+            host: config.host,
+            port,
+            patches,
+            cwd: workspace,
+            showWindow: false,
+          });
+          child = { pid: spawned.pid };
+          break;
+        }
       }
       serverStartedAt = Date.now(); // 服务启动成功即更新标记：已存活面板在下一次 open 时被判定为旧页面并强制刷新
     } catch (err) {
@@ -288,9 +353,11 @@ function createManager(deps) {
       vscode.window.showErrorMessage('DSH: failed to start: ' + msg);
       return { ready: false, reload: false };
     }
-    attachStderr(child);
-    writePidFile(workspace, child.pid);
-    startedDetached = config.detached;
+    if (child) {
+      attachStderr(child);
+      writePidFile(workspace, child.pid);
+    }
+    startedKeepAlive = config.launchMode === 'window-keepalive' || config.launchMode === 'hidden-keepalive';
     const ready = await proc.waitForPort(config.host, port);
     if (!ready) {
       const tail = stderrTail.trim();
@@ -305,11 +372,20 @@ function createManager(deps) {
 
   async function stop() {
     const workspace = detect.resolveWorkspace(vscode.workspace.workspaceFolders);
+    if (terminal) {
+      const t = terminal;
+      terminal = null;
+      t.dispose();
+      stderrTail = '';
+      startedKeepAlive = false;
+      vscode.window.showInformationMessage('DSH: stopped.');
+      return;
+    }
     if (child) {
       const stopped = await proc.killDsh(child);
       child = null;
       stderrTail = '';
-      startedDetached = false;
+      startedKeepAlive = false;
       removePidFile(workspace);
       if (stopped) {
         vscode.window.showInformationMessage('DSH: stopped.');
@@ -347,8 +423,14 @@ function createManager(deps) {
   }
 
   async function dispose() {
-    if (!child) return;
-    if (startedDetached) return; // 启动时为独立存活模式：不随编辑器关闭终止服务
+    if (!child && !terminal) return;
+    if (startedKeepAlive) return; // 启动时为独立存活模式：不随编辑器关闭终止服务
+    if (terminal) {
+      const t = terminal;
+      terminal = null;
+      t.dispose();
+      return;
+    }
     const c = child;
     child = null;
     stderrTail = '';

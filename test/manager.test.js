@@ -1,11 +1,11 @@
 /**
  * @intent
- * manager.js 的 node:test 编排测试，注入假 detect/process/vscode 断言决策顺序与边界。
+ * manager.js 的 node:test 编排测试，注入假 detect/process/webview/patch/vscode 断言决策顺序与边界。
  *
  * 验收条件：node --test 全绿，覆盖 open 自动启动、启动去重复用 child、端口占用归属判定、无工作区报错、
- * resolveDsh null 快速失败、端口超时报错、webview 单例创建/复用 reveal/重启重载/关页重建/创建失败回退、
+ * resolveDsh null 快速失败、端口超时报错、webview 单例/复用 reveal/重启重载/关页重建/创建失败回退、
  * 打开方式分叉（systemBrowser/simpleBrowser/multipleTabs/tab）、channel 日志、stop 无 child 提示、
- * pid 文件读写、detached 独立存活。
+ * pid 文件读写、五模式分发（integrated 终端 / window 桌面窗口 / hidden 静默 / window-keepalive 弹窗独立 / hidden-keepalive 静默独立+可选补丁）。
  */
 
 'use strict';
@@ -32,6 +32,8 @@ function makeHarness(opts) {
     waited: null,
     waitedCount: 0,
     channel: null,
+    patchAppliedChecks: 0,
+    terminals: [],
   };
 
   const fakeDetect = {
@@ -52,6 +54,11 @@ function makeHarness(opts) {
       calls.spawnCount++;
       return { pid: 1, killed: false };
     },
+    spawnDshVisible: (r, o) => {
+      calls.spawned = { r, o, visible: true };
+      calls.spawnCount++;
+      return { pid: 8, killed: false };
+    },
     waitForPort: async (host, port) => {
       calls.waited = { host, port };
       calls.waitedCount++;
@@ -70,10 +77,23 @@ function makeHarness(opts) {
       calls.spawnCount++;
       return { pid: 9 };
     },
+    buildTerminalCommand: (r, o) => {
+      calls.terminalCommand = { r, o };
+      return 'dsh web --host 127.0.0.1 --port 3080';
+    },
     ...(opts.process || {}),
   };
 
-  const baseSettings = { host: '127.0.0.1', webviewHost: '', port: 3080, dshPath: '', patchFile: '', openWith: 'tab' };
+  const fakePatch = {
+    isApplied: () => {
+      calls.patchAppliedChecks++;
+      return opts.patchApplied !== undefined ? opts.patchApplied : true;
+    },
+    buildPatchCommand: () => (opts.patchCommand !== undefined ? opts.patchCommand : "node -e 'x'"),
+    ...(opts.patch || {}),
+  };
+
+  const baseSettings = { host: '127.0.0.1', webviewHost: '', port: 3080, dshPath: '', patchFile: '', launchMode: 'hidden', windowsHidePatch: false, openWith: 'tab' };
   const cfgGet = (key) =>
     opts.settings && opts.settings[key] !== undefined ? opts.settings[key] : baseSettings[key];
 
@@ -94,6 +114,26 @@ function makeHarness(opts) {
     window: {
       showErrorMessage: (m) => calls.messages.push({ kind: 'error', m }),
       showInformationMessage: (m) => calls.messages.push({ kind: 'info', m }),
+      createTerminal: (name) => {
+        const t = {
+          name,
+          sent: [],
+          shown: 0,
+          disposed: false,
+          onDidClose: (cb) => {
+            t._close = cb;
+          },
+          sendText: (txt) => t.sent.push(txt),
+          show: () => {
+            t.shown++;
+          },
+          dispose: () => {
+            t.disposed = true;
+          },
+        };
+        calls.terminals.push(t);
+        return t;
+      },
       createOutputChannel: (name) => {
         calls.channel = { name, lines: [], appended: '' };
         return {
@@ -140,6 +180,7 @@ function makeHarness(opts) {
     detect: fakeDetect,
     process: fakeProc,
     webview,
+    patch: fakePatch,
     vscode,
     debounceMs: opts.debounceMs !== undefined ? opts.debounceMs : 0,
   });
@@ -349,8 +390,8 @@ test('dispose is safe without child', async () => {
   assert.strictEqual(h.calls.killed, null);
 });
 
-test('dispose does not kill child in detached (standalone) mode', async () => {
-  const h = makeHarness({ settings: { detached: true } });
+test('dispose does not kill child in window-keepalive mode', async () => {
+  const h = makeHarness({ settings: { launchMode: 'window-keepalive' } });
   await h.manager.open();
   assert.strictEqual(h.calls.spawnCount, 1);
   await h.manager.dispose();
@@ -435,8 +476,8 @@ test('dispose removes pid file when killing', async () => {
   }
 });
 
-test('open detached uses spawnStandalone and stop kills pseudo child', async () => {
-  const h = makeHarness({ settings: { detached: true } });
+test('open window-keepalive uses spawnStandalone and stop kills pseudo child', async () => {
+  const h = makeHarness({ settings: { launchMode: 'window-keepalive' } });
   await h.manager.open();
   assert.strictEqual(h.calls.spawnCount, 1);
   assert.ok(h.calls.spawned.standalone);
@@ -473,4 +514,89 @@ test('open creates separate tabs when multipleTabs is set', async () => {
   // 每次 open 新建独立面板（共享同一服务，不重复 spawn）
   assert.strictEqual(h.calls.panels.length, 2);
   assert.strictEqual(h.calls.spawnCount, 1);
+});
+
+test('hidden-keepalive with patch enabled patches then starts standalone silent', async () => {
+  const h = makeHarness({ settings: { launchMode: 'hidden-keepalive', windowsHidePatch: true }, patchApplied: false });
+  await h.manager.open();
+  assert.strictEqual(h.calls.patchAppliedChecks, 1);
+  assert.strictEqual(h.calls.terminals.length, 1);
+  assert.strictEqual(h.calls.terminals[0].sent.length, 1);
+  assert.strictEqual(h.calls.spawned.standalone, true);
+  assert.strictEqual(h.calls.spawned.o.showWindow, false);
+});
+
+test('hidden-keepalive skips patch when already applied', async () => {
+  const h = makeHarness({ settings: { launchMode: 'hidden-keepalive', windowsHidePatch: true }, patchApplied: true });
+  await h.manager.open();
+  assert.strictEqual(h.calls.patchAppliedChecks, 1);
+  assert.strictEqual(h.calls.terminals.length, 0);
+  assert.strictEqual(h.calls.spawned.standalone, true);
+  assert.strictEqual(h.calls.spawned.o.showWindow, false);
+});
+
+test('window-keepalive starts standalone with console window (showWindow=true)', async () => {
+  const h = makeHarness({ settings: { launchMode: 'window-keepalive' } });
+  await h.manager.open();
+  assert.strictEqual(h.calls.spawned.standalone, true);
+  assert.strictEqual(h.calls.spawned.o.showWindow, true);
+});
+
+test('integrated runs DSH in terminal without child', async () => {
+  const h = makeHarness({ settings: { launchMode: 'integrated' } });
+  await h.manager.open();
+  assert.strictEqual(h.calls.terminals.length, 1);
+  assert.strictEqual(h.calls.terminals[0].sent.length, 1);
+  assert.strictEqual(h.calls.spawned, null);
+  assert.strictEqual(h.manager.getChild(), null);
+});
+
+test('integrated stop disposes terminal', async () => {
+  const h = makeHarness({ settings: { launchMode: 'integrated' } });
+  await h.manager.open();
+  const t = h.calls.terminals[0];
+  assert.strictEqual(t.disposed, false);
+  await h.manager.stop();
+  assert.strictEqual(t.disposed, true);
+  assert.ok(h.calls.messages.some((x) => x.kind === 'info' && x.m.includes('stopped')));
+});
+
+test('dispose disposes terminal in integrated mode', async () => {
+  const h = makeHarness({ settings: { launchMode: 'integrated' } });
+  await h.manager.open();
+  const t = h.calls.terminals[0];
+  await h.manager.dispose();
+  assert.strictEqual(t.disposed, true);
+});
+
+test('dispose does not kill child in hidden-keepalive mode', async () => {
+  const h = makeHarness({ settings: { launchMode: 'hidden-keepalive', windowsHidePatch: true }, patchApplied: true });
+  await h.manager.open();
+  await h.manager.dispose();
+  assert.strictEqual(h.calls.killed, null);
+  assert.ok(h.manager.getChild());
+});
+
+test('window mode spawns visible desktop window via spawnDshVisible', async () => {
+  const h = makeHarness({ settings: { launchMode: 'window' } });
+  await h.manager.open();
+  assert.ok(h.calls.spawned.visible);
+  assert.strictEqual(h.calls.spawnCount, 1);
+});
+
+test('hidden mode spawns silently via spawnDsh', async () => {
+  const h = makeHarness({ settings: { launchMode: 'hidden' } });
+  await h.manager.open();
+  assert.ok(h.calls.spawned);
+  assert.strictEqual(h.calls.spawned.visible, undefined);
+  assert.strictEqual(h.calls.spawnCount, 1);
+});
+
+test('hidden-keepalive without patch flag does not patch', async () => {
+  const h = makeHarness({ settings: { launchMode: 'hidden-keepalive' }, patchApplied: false });
+  await h.manager.open();
+  assert.strictEqual(h.calls.patchAppliedChecks, 0);
+  assert.strictEqual(h.calls.terminals.length, 0);
+  assert.strictEqual(h.calls.spawned.standalone, true);
+  assert.strictEqual(h.calls.spawned.o.showWindow, false);
 });

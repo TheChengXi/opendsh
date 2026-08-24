@@ -1,10 +1,10 @@
 /**
  * @intent
  * detect.js 的 node:test 单测，覆盖设置回退、工作区解析、patch 发现、dsh 定位优先级（dshPath > npm 全局 > PATH，落空 null）、
- * buildUrl、buildFocusUrls（聚焦 URL 契约）。
+ * buildUrl、launchMode 枚举、windowsHidePatch 回退。
  *
- * 验收条件：node --test 全绿，覆盖 resolveConfig / resolveWorkspace / resolvePatches / resolveNpmGlobal / resolveDsh /
- * buildUrl / buildFocusUrls 聚焦契约已移除；openWith 合法值为 tab/simpleBrowser/systemBrowser，focus 与非法值回退 tab。
+ * 验收条件：node --test 全绿；launchMode 仅 5 个合法值、其余（含旧 showWindow/detached/experimentalSilentKeepAlive 遗留）回退 integrated；
+ * windowsHidePatch 非 true 回退 false；openWith 合法值为 tab/simpleBrowser/systemBrowser（其余回退 tab）。
  */
 
 'use strict';
@@ -29,19 +29,19 @@ test('resolveConfig falls back to defaults on missing/invalid values', () => {
     port: 3080,
     dshPath: '',
     patchFile: '',
-    detached: false,
-    showWindow: false,
+    launchMode: 'integrated',
+    windowsHidePatch: false,
     openWith: 'tab',
     multipleTabs: false,
   });
-  assert.deepStrictEqual(detect.resolveConfig({ host: '', port: 'abc', dshPath: '  ', patchFile: 5, detached: 'yes', showWindow: 1, openWith: 'bogus' }), {
+  assert.deepStrictEqual(detect.resolveConfig({ host: '', port: 'abc', dshPath: '  ', patchFile: 5, launchMode: 'bogus', windowsHidePatch: 'yes', openWith: 'bogus' }), {
     host: '127.0.0.1',
     webviewHost: '127.0.0.1',
     port: 3080,
     dshPath: '',
     patchFile: '',
-    detached: false,
-    showWindow: false,
+    launchMode: 'integrated',
+    windowsHidePatch: false,
     openWith: 'tab',
     multipleTabs: false,
   });
@@ -314,10 +314,17 @@ test('resolveNpmGlobal uses resolved node path not execPath', async () => {
   }
 });
 
-test('resolveConfig passes through detached/showWindow booleans', () => {
-  const r = detect.resolveConfig({ detached: true, showWindow: true });
-  assert.strictEqual(r.detached, true);
-  assert.strictEqual(r.showWindow, true);
+test('resolveConfig resolves launchMode enum and windowsHidePatch', () => {
+  for (const m of ['integrated', 'window', 'hidden', 'window-keepalive', 'hidden-keepalive']) {
+    assert.strictEqual(detect.resolveConfig({ launchMode: m }).launchMode, m);
+  }
+  assert.strictEqual(detect.resolveConfig({}).launchMode, 'integrated');
+  assert.strictEqual(detect.resolveConfig({ launchMode: 'bogus' }).launchMode, 'integrated');
+  // 旧 showWindow 值（terminal/output）与旧键遗留一律回退默认 integrated
+  assert.strictEqual(detect.resolveConfig({ launchMode: 'terminal' }).launchMode, 'integrated');
+  assert.strictEqual(detect.resolveConfig({ launchMode: 'output' }).launchMode, 'integrated');
+  assert.strictEqual(detect.resolveConfig({ windowsHidePatch: true }).windowsHidePatch, true);
+  assert.strictEqual(detect.resolveConfig({ windowsHidePatch: 'yes' }).windowsHidePatch, false);
+  assert.strictEqual(detect.resolveConfig({}).windowsHidePatch, false);
   assert.strictEqual(detect.resolveConfig({ multipleTabs: true }).multipleTabs, true);
-  assert.strictEqual(detect.resolveConfig({}).multipleTabs, false);
 });

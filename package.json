@@ -2,7 +2,7 @@
   "name": "opendsh",
   "displayName": "Open DSH",
   "description": "Open the DeepSeek Harness Web UI inside VS Code. One-click editor title and status bar buttons open a single reusable tab; auto-starts the dsh web server for the current workspace, with a one-command stop.",
-  "version": "0.0.24",
+  "version": "0.1.0",
   "publisher": "TheChengXi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -72,42 +72,56 @@
         "opendsh.host": {
           "type": "string",
           "default": "127.0.0.1",
-          "description": "Host the DSH web server binds to."
+          "description": "DSH Web服务器绑定的主机。Host the DSH web server binds to."
         },
         "opendsh.webviewHost": {
           "type": "string",
           "default": "",
-          "description": "Host used inside VS Code webviews to reach DSH. Empty means same as opendsh.host. Set it to an alias like 'dsh.local' (mapped to 127.0.0.1 in your hosts file) to bypass VS Code's service-worker interception of localhost requests, which blanks webviews in the side bar / panel. Only affects the webview URL; the server itself still binds to opendsh.host."
+          "description": "在VS Code Webview中用于访问DSH的主机。为空则与opendsh.host相同。设置为像'dsh.local'这样的别名（在hosts文件中映射到127.0.0.1）以绕过VS Code对localhost请求的Service Worker拦截，该拦截会导致侧边栏/面板中的Webview空白。仅影响Webview URL；服务器本身仍绑定到opendsh.host。Host used inside VS Code webviews to reach DSH. Empty means same as opendsh.host. Set it to an alias like 'dsh.local' (mapped to 127.0.0.1 in your hosts file) to bypass VS Code's service-worker interception of localhost requests, which blanks webviews in the side bar / panel. Only affects the webview URL; the server itself still binds to opendsh.host."
         },
         "opendsh.port": {
           "type": "number",
           "default": 3080,
-          "description": "Port the DSH web server listens on."
+          "description": "DSH Web服务器监听的端口。Port the DSH web server listens on."
         },
         "opendsh.dshPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the dsh executable. Empty means auto-resolve (npm global install, then PATH); an error is shown when dsh is not found."
+          "description": "dsh可执行文件的路径。为空则自动解析（npm全局安装，然后PATH）；未找到dsh时显示错误。Path to the dsh executable. Empty means auto-resolve (npm global install, then PATH); an error is shown when dsh is not found."
         },
         "opendsh.patchFile": {
           "type": "string",
           "default": "",
-          "description": "MCP patch file passed to 'dsh web'. Empty means auto-discover .dsh/*.patch.yml in the workspace."
+          "description": "传递给'dsh web'的MCP补丁文件。为空则自动发现工作区中的.dsh/*.patch.yml。MCP patch file passed to 'dsh web'. Empty means auto-discover .dsh/*.patch.yml in the workspace."
         },
-        "opendsh.detached": {
+        "opendsh.launch.mode": {
+          "type": "string",
+          "enum": [
+            "integrated",
+            "window",
+            "hidden",
+            "window-keepalive",
+            "hidden-keepalive"
+          ],
+          "default": "integrated",
+          "markdownEnumDescriptions": [
+            "在 VS Code **集成终端**中运行 DSH，随 VS Code 关闭而停止（默认）。Runs DSH in a VS Code integrated terminal; stops when VS Code closes (default).",
+            "在**桌面控制台窗口**中运行 DSH，随 VS Code 关闭而停止。Runs DSH in a desktop console window; stops when VS Code closes.",
+            "**静默**启动（无终端/无窗口），日志进 Output 面板 'DSH' 通道，随 VS Code 关闭而停止。Starts silently (no terminal / no window) with logs in the Output panel 'DSH' channel; stops when VS Code closes.",
+            "在**桌面控制台窗口**中运行 DSH，VS Code 关闭后**继续运行**（关窗或 Stop 才停）。Runs DSH in a desktop console window; keeps running after VS Code closes (close the window or Stop to stop).",
+            "**静默**启动，VS Code 关闭后**继续运行**；可配合 `opendsh.experimental.windowsHidePatch` 抑制工具调用闪窗。Starts silently; keeps running after VS Code closes; can be paired with `opendsh.experimental.windowsHidePatch` to stop tool-call windows from flashing."
+          ],
+          "markdownDescription": "DSH 的启动方式（输出载体 × 是否随 VS Code 存活）。启动模式在启动那一刻固定：改动只影响下次启动，请先 Stop DSH（或关窗/关端）再 Open DSH。Launch mode (output carrier × whether it survives VS Code). Fixed at start time: Stop DSH first, then Open DSH again."
+        },
+        "opendsh.experimental.windowsHidePatch": {
           "type": "boolean",
           "default": false,
-          "description": "Keep the DSH server running after VS Code exits. On Windows it is started via WMI outside VS Code's process tree, so it truly survives VS Code close (with its own console window when showWindow is on). Default false: server stops with VS Code. The launch mode is fixed at start time: changing this setting only affects the next launch, so Stop DSH (or Close) first, then Open DSH again."
-        },
-        "opendsh.showWindow": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show a console window for the DSH server; closing the window stops the server. Default false: silent startup with logs in the Output panel."
+          "description": "实验性功能：仅当启动模式为 'hidden-keepalive' 时，通过集成终端中的命令一次性修补 DSH 源代码（windowsHide），以阻止工具调用窗口闪烁。这会修改 DSH 已安装的源代码，存在风险。默认 false。EXPERIMENTAL: only when launch mode is 'hidden-keepalive', patch the DSH source (windowsHide) once via a command in the integrated terminal to stop tool-call windows from flashing. This modifies DSH's installed source and is risky. Default false."
         },
         "opendsh.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Start the dsh web server and open the DSH tab automatically when VS Code starts. Disable to open on demand only."
+          "description": "在VS Code启动时自动启动dsh Web服务器并打开DSH标签页。禁用则仅在需要时打开。Start the dsh web server and open the DSH tab automatically when VS Code starts. Disable to open on demand only."
         },
         "opendsh.openWith": {
           "type": "string",
@@ -117,12 +131,12 @@
             "systemBrowser"
           ],
           "default": "tab",
-          "description": "Default way to open the DSH UI (used only as the initial value; the activity-bar panel switches this at runtime and remembers it): 'tab' (built-in single reusable tab, default), 'simpleBrowser' (VS Code's built-in Simple Browser, one new tab per open), 'systemBrowser' (your system browser at http://host:port)."
+          "description": "打开DSH UI的默认方式（仅作为初始值；活动栏面板在运行时切换并记住它）：'tab'（内置单个可重用标签页，默认），'simpleBrowser'（VS Code内置的简易浏览器，每次打开一个新标签页），'systemBrowser'（系统浏览器，地址为http://host:port）。Default way to open the DSH UI (used only as the initial value; the activity-bar panel switches this at runtime and remembers it): 'tab' (built-in single reusable tab, default), 'simpleBrowser' (VS Code's built-in Simple Browser, one new tab per open), 'systemBrowser' (your system browser at http://host:port)."
         },
         "opendsh.multipleTabs": {
           "type": "boolean",
           "default": false,
-          "description": "Allow opening multiple DSH tabs (one per open) instead of reusing the single built-in tab. Only applies when 'opendsh.openWith' is 'tab'. All tabs share the same dsh server (one port); rapid repeated opens are throttled to avoid accidental duplicates."
+          "description": "允许打开多个DSH标签页（每次打开一个）而不是重用单个内置标签页。仅在'opendsh.openWith'为'tab'时适用。所有标签页共享同一个dsh服务器（一个端口）；快速重复打开会被限制以避免意外重复。Allow opening multiple DSH tabs (one per open) instead of reusing the single built-in tab. Only applies when 'opendsh.openWith' is 'tab'. All tabs share the same dsh server (one port); rapid repeated opens are throttled to avoid accidental duplicates."
         }
       }
     }

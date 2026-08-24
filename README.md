@@ -52,12 +52,15 @@
 - `opendsh.dshPath`（默认 `""`）—— `dsh` 的路径；留空表示自动（先 npm 全局安装，后 PATH）。
 - `opendsh.patchFile`（默认 `""`）—— MCP 补丁文件；留空表示自动发现工作区根目录下的
   `.dsh/*.patch.yml`。
-- `opendsh.detached`（默认 `false`）—— 服务是否独立于编辑器存活；`false` 时关闭 VS Code 随之一同停止，
-  `true` 时（Windows）经 WMI 在 VS Code 进程树之外启动，关闭 VS Code 后服务真正继续运行（配合
-  `showWindow` 可带独立控制台窗口）。启动模式在启动那一刻固定：**切换此配置后需先 `Stop DSH`（或关窗）
-  再重新 `Open DSH` 才生效**。
-- `opendsh.showWindow`（默认 `false`）—— 是否弹出控制台窗口显示服务地址；`false` 时静默启动（日志在
-  Output 面板 DSH 频道），`true` 时弹出窗口，关闭窗口即停止服务。
+- `opendsh.launch.mode`（默认 `"integrated"`）—— 启动方式（输出载体 × 是否随 VS Code 存活）五选一：
+  - `integrated`：在 VS Code 集成终端运行，随 VS Code 关闭而停止（默认）。
+  - `window`：在桌面控制台窗口运行，随 VS Code 关闭而停止。
+  - `hidden`：静默启动（日志在 Output 面板 DSH 频道），随 VS Code 关闭而停止。
+  - `window-keepalive`：在桌面控制台窗口运行，VS Code 关闭后**继续运行**（关窗或 Stop 才停）。
+  - `hidden-keepalive`：静默启动，VS Code 关闭后继续运行。
+  启动模式在启动那一刻固定：**切换后需先 `Stop DSH`（或关窗/关端）再重新 `Open DSH` 才生效**。
+- `opendsh.experimental.windowsHidePatch`（默认 `false`）—— 实验功能：仅当 `launch.mode = "hidden-keepalive"` 时，
+  通过集成终端一次性修补 DSH 源码（`windowsHide`）以抑制工具调用闪窗；会修改已安装源码，存在风险。
 - `opendsh.autoStart`（默认 `true`）—— VS Code 启动时是否自动启动 dsh 服务并打开 DSH 标签页；
   `false` 时仅按需打开。
 - `opendsh.openWith`（默认 `"tab"`）—— 打开方式：`"tab"`（内置单例标签页）/ `"simpleBrowser"`（VS Code 内置
@@ -134,6 +137,17 @@ and can start / stop the `dsh web` server for the current workspace.
 - `opendsh.dshPath` (default `""`) — path to `dsh`; empty means auto (npm global install, then PATH).
 - `opendsh.patchFile` (default `""`) — MCP patch file; empty means auto-discover
   `.dsh/*.patch.yml` in the workspace root.
+- `opendsh.launch.mode` (default `"integrated"`) — how to launch (output carrier × whether it
+  survives VS Code), one of:
+  - `integrated`: in a VS Code integrated terminal; stops when VS Code closes (default).
+  - `window`: in a desktop console window; stops when VS Code closes.
+  - `hidden`: silent, logs in the Output panel "DSH" channel; stops when VS Code closes.
+  - `window-keepalive`: in a desktop console window; **keeps running** after VS Code closes.
+  - `hidden-keepalive`: silent; keeps running after VS Code closes.
+  The launch mode is fixed at start time: after changing it, `Stop DSH` first, then `Open DSH`.
+- `opendsh.experimental.windowsHidePatch` (default `false`) — experimental: only when
+  `launch.mode = "hidden-keepalive"`, patch the DSH source (`windowsHide`) once via the integrated
+  terminal to stop tool-call windows from flashing; modifies the installed source, at your own risk.
 - `opendsh.autoStart` (default `true`) — whether VS Code auto-starts the dsh server and opens
   the DSH tab on startup; `false` opens on demand only.
 - `opendsh.openWith` (default `"tab"`) — how to open the DSH UI: `"tab"` (built-in single
@@ -162,7 +176,7 @@ To open from a terminal: `start "" "vscode://TheChengXi.opendsh/open"` (Windows)
 
 ### 问题 / Issue
 
-在 Windows 上**静默启动** `dsh web`（本扩展默认 `showWindow: false`）后，与 agent 对话时
+在 Windows 上以静默模式（`launch.mode = "hidden"` 或 `"hidden-keepalive"`）启动 `dsh web` 后，与 agent 对话时
 **每次调用 shell / subprocess 工具，任务栏都会闪现一个 node 控制台窗口**（一闪而过，快到来不及看清）。
 反复调用工具时反复弹窗。
 
@@ -177,6 +191,8 @@ To open from a terminal: `start "" "vscode://TheChengXi.opendsh/open"` (Windows)
 仓库内置可重复执行的幂等补丁 `scripts/patch-dsh-windows-hide.mjs`：给 `spawnSubprocess()` 的 `spawn()`
 补一行 `windowsHide: platform === "win32"`（不改执行模型、不剥离 Windows ACL 隔离沙箱）。仅 win32 生效，
 非 win32 无副作用；stdout/stderr 本就 pipe 回收到对话，用户并不需要独立控制台。
+扩展也内置了同一补丁逻辑（`src/patch.js`）：当 `launch.mode = "hidden-keepalive"` 且开启
+`experimental.windowsHidePatch` 时，扩展会在集成终端自动执行补丁命令（幂等，已打则跳过）。
 
 ```bash
 node scripts/patch-dsh-windows-hide.mjs           # 应用补丁（幂等）
@@ -190,7 +206,7 @@ node scripts/patch-dsh-windows-hide.mjs --check   # 只检查是否已打过
 
 ### Status
 
-On Windows, when `dsh web` runs **silently** (the extension default `showWindow: false`), every
+On Windows, when `dsh web` runs **silently** (`launch.mode = "hidden"` or `"hidden-keepalive"`), every
 shell / subprocess tool call flashes a `node` console window in the taskbar while you chat with an agent.
 The root cause is **not this extension**: DSH wraps each confined command as
 `[node, .../dsh-sandbox-windows-acl/runner.js, <payload>]` and spawns it via `dsh-subprocess-local`'s

@@ -2,7 +2,7 @@
  * @intent
  * 跨平台 DSH 进程与端口适配：拼 spawn 参数、spawn/kill 子进程、探测端口占用、等待端口就绪、HTTP 探测端口归属。
  *
- * 边界：spawn 用 detached + stdio:[ignore,ignore,pipe] + windowsHide 使服务独立于编辑器存活且 stderr 可诊断；
+ * 边界：spawnDsh 静默 spawn（detached + stdio:[ignore,ignore,pipe] + windowsHide，stderr 可诊断）；spawnDshVisible 桌面窗口 spawn（stdio:inherit + detached:false，输出直写窗口不经过 pipe）；
  * direct 模式（node + bin.js 真实入口）直接 spawn 不经 cmd shim，仅 PATH 兜底命中的 .cmd 才走 shell；
  * kill 在 Windows 用 taskkill /T /F 树杀，POSIX 用 child.kill；
  * httpProbe 以 2xx + body 含 __DSH_BOOT__ 判定端口归属 dsh，用于区分「外部手动起的 dsh」与「其他程序占用」。
@@ -11,10 +11,10 @@
  * - buildDshArgs 顺序 = [prefix..., web, --patch p..., --host host, --port port]（--patch 必须在 --host/--port 前，否则 dsh 报 unknown option）
  * - isPortInUse 对真实监听端口返回 true，空闲端口返回 false（未监听探测超时 100ms）
  * - waitForPort 端口在超时内就绪返回 true，超时返回 false
- * - spawnDsh 默认静默（stdio pipe stderr + windowsHide + detached）；showWindow=true 时 stdio inherit + 不隐藏 + 非 detached（用户可控窗口）；
- * - spawnDsh direct 模式 shell:false；.cmd 兜底模式 shell:true
+ * - spawnDsh 统一静默（stdio pipe stderr + windowsHide + detached）；spawnDshVisible 桌面窗口（stdio inherit + detached false）；direct 模式 shell:false；.cmd 兜底模式 shell:true
  * - httpProbe 对 dsh 特征响应返回 true，非 dsh 响应/连接失败返回 false
  * - killDsh 在 win 拼 taskkill /pid <pid> /T /F，非 win 调 child.kill；killPid 按纯 pid 杀（无 child 对象，POSIX 用 process.kill）
+ * - buildTerminalCommand 输出可交给 VSCode 集成终端执行的单行命令（command + 转义后参数），terminal 模式专用
  */
 
 'use strict';
@@ -42,27 +42,46 @@ function spawnDsh(resolved, opts, spawnFn) {
   const o = opts || {};
   const args = buildDshArgs(resolved, o);
   const isWin = (o.platform || process.platform) === 'win32';
-  const showWindow = o.showWindow === true;
   // 仅 .cmd/.bat 需要 shell（npm shim 兜底）；node + bin.js 直接 spawn，绕开 cmd 嵌套
   const needShell = isWin && /\.(cmd|bat)$/i.test(resolved.command || '');
-  // detached 与窗口互斥：DETACHED_PROCESS 无控制台，窗口模式必须非 detached（独立存活由父退子活保证）
-  const detached = !showWindow;
-  console.log('[opendsh] spawnDsh: showWindow=' + showWindow + ', detached=' + detached + ', windowsHide=' + (isWin && !showWindow));
   const child = spawn(resolved.command, args, {
     cwd: o.cwd,
     shell: needShell,
-    detached,
-    stdio: showWindow ? 'inherit' : ['ignore', 'ignore', 'pipe'],
-    windowsHide: isWin && !showWindow,
+    detached: true,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    windowsHide: isWin,
   });
   if (child && typeof child.unref === 'function') child.unref();
   return child;
+}
+
+// 桌面可见控制台窗口启动（window 模式，随 VS Code 关闭）：stdio inherit 让 Windows 分配新控制台窗口，
+// 输出直写窗口不走 stderr pipe（故 child.stderr 为 null，manager 不 attachStderr）。
+function spawnDshVisible(resolved, opts, spawnFn) {
+  const spawn = spawnFn || childProcess.spawn;
+  const o = opts || {};
+  const args = buildDshArgs(resolved, o);
+  const isWin = (o.platform || process.platform) === 'win32';
+  // 仅 .cmd/.bat 需要 shell（npm shim 兜底）；node + bin.js 直接 spawn，绕开 cmd 嵌套
+  const needShell = isWin && /\.(cmd|bat)$/i.test(resolved.command || '');
+  return spawn(resolved.command, args, {
+    cwd: o.cwd,
+    shell: needShell,
+    detached: false,
+    stdio: 'inherit',
+  });
 }
 
 function quoteWinArg(s) {
   const str = String(s);
   if (!/[\s"]/.test(str)) return str;
   return '"' + str.replace(/"/g, '\\"') + '"';
+}
+
+// 拼接可交给 VS Code 集成终端执行的单行命令（command + buildDshArgs，含空格/引号时逐个包裹）。
+function buildTerminalCommand(resolved, opts) {
+  const r = resolved || {};
+  return [r.command, ...buildDshArgs(r, opts)].map(quoteWinArg).join(' ');
 }
 
 function buildWmiScript(resolved, opts) {
@@ -228,7 +247,9 @@ function killDsh(child, deps) {
 module.exports = {
   buildDshArgs,
   spawnDsh,
+  spawnDshVisible,
   quoteWinArg,
+  buildTerminalCommand,
   buildWmiScript,
   spawnDshStandalone,
   spawnStandalone,

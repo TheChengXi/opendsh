@@ -1,8 +1,11 @@
 /**
  * @intent
- * process.js 的 node:test 单测，覆盖参数拼接、端口探测（真实 socket）、spawn direct/shell 分支、HTTP 归属探测、kill 树杀参数。
+ * process.js 的 node:test 单测，覆盖参数拼接、端口探测（真实 socket）、spawn 静默/桌面窗口分支、buildTerminalCommand、
+ * HTTP 归属探测、kill 树杀参数。
  *
- * 验收条件：node --test 全绿，只 mock spawn / taskkill / execFile 系统边界，不 mock 内部协作者。
+ * 验收条件：node --test 全绿，只 mock spawn / taskkill / execFile 系统边界，不 mock 内部协作者；
+ * spawnDsh 统一静默（stdio pipe + windowsHide + detached）；spawnDshVisible 桌面窗口（stdio inherit + detached false）；
+ * buildTerminalCommand 输出单行命令串。
  */
 
 'use strict';
@@ -29,6 +32,7 @@ test('buildDshArgs builds ordered args with prefix and patches', () => {
     '127.0.0.1',
     '--port',
     '3080',
+    '--no-open',
   ]);
 });
 
@@ -37,7 +41,7 @@ test('buildDshArgs prepends npx prefix', () => {
     { command: 'npx', prefixArgs: ['@deepseek-ai/dsh'] },
     { host: '127.0.0.1', port: 3080, patches: [] }
   );
-  assert.deepStrictEqual(args, ['@deepseek-ai/dsh', 'web', '--host', '127.0.0.1', '--port', '3080']);
+  assert.deepStrictEqual(args, ['@deepseek-ai/dsh', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open']);
 });
 
 test('spawnDsh non-win spawns directly without shell', () => {
@@ -52,7 +56,7 @@ test('spawnDsh non-win spawns directly without shell', () => {
     fakeSpawn
   );
   assert.strictEqual(captured.cmd, 'dsh');
-  assert.deepStrictEqual(captured.args, ['web', '--host', '127.0.0.1', '--port', '3080']);
+  assert.deepStrictEqual(captured.args, ['web', '--host', '127.0.0.1', '--port', '3080', '--no-open']);
   assert.strictEqual(captured.opts.shell, false);
   assert.strictEqual(captured.opts.detached, true);
   assert.deepStrictEqual(captured.opts.stdio, ['ignore', 'ignore', 'pipe']);
@@ -79,6 +83,7 @@ test('spawnDsh win .cmd fallback spawns with shell true and windowsHide', () => 
     '127.0.0.1',
     '--port',
     '8080',
+    '--no-open',
   ]);
   assert.strictEqual(captured.opts.shell, true);
   assert.strictEqual(captured.opts.windowsHide, true);
@@ -105,11 +110,30 @@ test('spawnDsh win direct (node + bin.js) spawns without shell', () => {
     '127.0.0.1',
     '--port',
     '8080',
+    '--no-open',
   ]);
   assert.strictEqual(captured.opts.shell, false);
   assert.strictEqual(captured.opts.windowsHide, true);
   assert.strictEqual(captured.opts.detached, true);
   assert.deepStrictEqual(captured.opts.stdio, ['ignore', 'ignore', 'pipe']);
+});
+
+test('spawnDshVisible win spawns with stdio inherit and not detached', () => {
+  let captured = null;
+  const fakeSpawn = (cmd, args, opts) => {
+    captured = { cmd, args, opts };
+    return { pid: 4 };
+  };
+  proc.spawnDshVisible(
+    { command: 'C:/node/node.exe', prefixArgs: ['C:/npm/node_modules/@deepseek-ai/dsh/lib/bin.js'] },
+    { platform: 'win32', host: '127.0.0.1', port: 8080, patches: [], cwd: 'C:/ws' },
+    fakeSpawn
+  );
+  assert.strictEqual(captured.cmd, 'C:/node/node.exe');
+  assert.strictEqual(captured.opts.shell, false);
+  assert.strictEqual(captured.opts.detached, false);
+  assert.strictEqual(captured.opts.stdio, 'inherit');
+  assert.strictEqual(captured.opts.windowsHide, undefined);
 });
 
 test('isPortInUse true on listening port, false on free port', async () => {
@@ -224,20 +248,23 @@ test('killDsh returns false when no child', async () => {
   assert.strictEqual(await proc.killDsh(null, { platform: 'linux' }), false);
 });
 
-test('spawnDsh showWindow true uses inherit stdio, no windowsHide, non-detached', () => {
-  let captured = null;
-  const fakeSpawn = (cmd, args, opts) => {
-    captured = { cmd, args, opts };
-    return { pid: 4, unref() {} };
-  };
-  proc.spawnDsh(
+test('buildTerminalCommand joins command and args in order', () => {
+  const cmd = proc.buildTerminalCommand(
     { command: 'C:/node/node.exe', prefixArgs: ['C:/bin.js'] },
-    { platform: 'win32', host: '127.0.0.1', port: 8080, patches: [], cwd: 'C:/ws', showWindow: true },
-    fakeSpawn
+    { host: '127.0.0.1', port: 3080, patches: [], cwd: 'C:/ws' }
   );
-  assert.strictEqual(captured.opts.stdio, 'inherit');
-  assert.strictEqual(captured.opts.windowsHide, false);
-  assert.strictEqual(captured.opts.detached, false);
+  assert.strictEqual(cmd, 'C:/node/node.exe C:/bin.js web --host 127.0.0.1 --port 3080 --no-open');
+});
+
+test('buildTerminalCommand quotes args containing spaces', () => {
+  const cmd = proc.buildTerminalCommand(
+    { command: 'C:/node/node.exe', prefixArgs: ['C:/my bin.js'] },
+    { host: '127.0.0.1', port: 3080, patches: ['C:/ws/.dsh/a b.patch.yml'], cwd: 'C:/ws' }
+  );
+  assert.strictEqual(
+    cmd,
+    'C:/node/node.exe "C:/my bin.js" web --patch "C:/ws/.dsh/a b.patch.yml" --host 127.0.0.1 --port 3080 --no-open'
+  );
 });
 
 test('killPid win runs taskkill /T /F', async () => {

@@ -1,7 +1,7 @@
 /**
  * @intent
  * VS Code 激活入口：注册 open/stop 命令、URI 深链与状态栏快捷按钮（点击执行 opendsh.open），
- * 读设置并交予 manager，自身无业务逻辑。编辑器标题栏按钮（大写 D）由 package.json 的
+ * 读设置并交予 manager（注入 detect/process/webview/patch/vscode），自身无业务逻辑。编辑器标题栏按钮（大写 D）由 package.json 的
  * contributes.menus.editor/title 声明（点击同样执行 opendsh.open），无需代码注册。
  * 薄壳启动器：不含任何活动栏面板/聚焦承载，打开方式完全由 settings.openWith 决定。
  * 启动自启：按 opendsh.autoStart（默认 true）在窗口就绪后自动调用 manager.open()
@@ -17,6 +17,7 @@
  * - 创建状态栏按钮（text「DSH」/ command=opendsh.open）并 show
  * - 启动时 autoStart 非 false 则调用 manager.open()
  * - registerUriHandler 将 /open 映射到 manager.open
+ * - createManager 注入 patch 模块（实验版补丁配角）
  * - deactivate 调用 manager.dispose()（无 manager 时安全返回）
  */
 
@@ -27,11 +28,12 @@ const { createManager } = require('./src/manager');
 const detect = require('./src/detect');
 const proc = require('./src/process');
 const webview = require('./src/webview');
+const patch = require('./src/patch');
 
 let manager = null;
 
 function activate(context) {
-  manager = createManager({ detect, process: proc, webview, vscode });
+  manager = createManager({ detect, process: proc, webview, patch, vscode });
 
   context.subscriptions.push(vscode.commands.registerCommand('opendsh.open', manager.open));
   context.subscriptions.push(vscode.commands.registerCommand('opendsh.stop', manager.stop));
