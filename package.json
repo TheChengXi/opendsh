@@ -131,7 +131,7 @@
             "systemBrowser"
           ],
           "default": "tab",
-          "description": "打开DSH UI的默认方式（仅作为初始值；活动栏面板在运行时切换并记住它）：'tab'（内置单个可重用标签页，默认），'simpleBrowser'（VS Code内置的简易浏览器，每次打开一个新标签页），'systemBrowser'（系统浏览器，地址为http://host:port）。Default way to open the DSH UI (used only as the initial value; the activity-bar panel switches this at runtime and remembers it): 'tab' (built-in single reusable tab, default), 'simpleBrowser' (VS Code's built-in Simple Browser, one new tab per open), 'systemBrowser' (your system browser at http://host:port)."
+          "description": "打开DSH UI的方式（纯 settings 决定，无面板、无状态记忆）：'tab'（内置单个可重用标签页，默认），'simpleBrowser'（VS Code内置的简易浏览器，每次打开一个新标签页），'systemBrowser'（系统浏览器，地址为http://host:port）。How to open the DSH UI (pure settings, no panel / no state memory): 'tab' (built-in single reusable tab, default), 'simpleBrowser' (VS Code's built-in Simple Browser, one new tab per open), 'systemBrowser' (your system browser at http://host:port)."
         },
         "opendsh.multipleTabs": {
           "type": "boolean",

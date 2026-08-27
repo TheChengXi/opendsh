@@ -27,7 +27,7 @@
   自动启动 dsh 服务并打开 DSH 标签页，重载 / 重启后标签页自动恢复；设为 `false` 则仅按需打开。
 - **打开方式三选一（可选）** —— 设置 `opendsh.openWith`（默认 `"tab"`）：
   - `"tab"`：内置单例标签页（默认，重复打开只聚焦不新建）
-  - `"simpleBrowser"`：VS Code 内置 Simple Browser（每次打开新建标签页，即单标签页改造前的默认方式）
+  - `"simpleBrowser"`：VS Code 内置 Simple Browser（每次打开新建标签页）
   - `"systemBrowser"`：系统浏览器直接浏览 `http://host:port`（保留地址栏 / DevTools / 扩展等完整浏览器能力）
 - **多标签页（可选）** —— 设置 `opendsh.multipleTabs`（默认 `false`）为 `true` 时，`"tab"` 方式下每次打开都
   新建独立 DSH 标签页（所有标签页共享同一个 dsh 服务端口），适合对照查看；所有打开操作带 300ms 防连点节流，
@@ -71,7 +71,7 @@
 ## 安装
 
 用 `npx @vscode/vsce package` 打包出 `.vsix` 后安装；或把本目录复制到扩展目录下，命名为
-`TheChengXi.opendsh-0.0.3`，然后重载窗口。
+`TheChengXi.opendsh-0.1.0`，然后重载窗口。
 
 ## 测试
 
@@ -106,8 +106,7 @@ and can start / stop the `dsh web` server for the current workspace.
 - **Open-with options (optional)** — the `opendsh.openWith` setting (default `"tab"`) chooses
   how the DSH UI opens:
   - `"tab"`: built-in single reusable tab (default; re-opening focuses it, never stacks).
-  - `"simpleBrowser"`: VS Code's built-in Simple Browser (one new tab per open, the default
-    way before the single-tab change).
+  - `"simpleBrowser"`: VS Code's built-in Simple Browser (one new tab per open).
   - `"systemBrowser"`: your system browser at `http://host:port` (full browser capabilities:
     address bar, devtools, extensions).
 - **Multiple tabs (optional)** — set `opendsh.multipleTabs` (default `false`) to `true` to have
@@ -159,7 +158,7 @@ and can start / stop the `dsh web` server for the current workspace.
 ## Install
 
 Build a `.vsix` with `npx @vscode/vsce package`, then install it; or copy this folder into
-your extensions directory as `TheChengXi.opendsh-0.0.3` and reload the window.
+your extensions directory as `TheChengXi.opendsh-0.1.0` and reload the window.
 
 ## Test
 

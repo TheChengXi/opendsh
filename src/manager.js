@@ -17,6 +17,8 @@
  * stop 无记录实例时仅提示不抛异常；createWebviewPanel 抛错回退 openExternal；
  * 标签页关闭（onDidDispose）仅清面板引用，不触碰子进程；
  * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal。
+ * 配置读取经 readSettings：VS Code 嵌套设置键必须用点式键读（cfg.get('launch.mode')→字段 launchMode、cfg.get('experimental.windowsHidePatch')→字段 windowsHidePatch），
+ *   其余单段键（host/port/dshPath/patchFile/openWith/multipleTabs）用同名 key；产出对象为扁平字段（供 detect.resolveConfig 消费）。
  * 五模式启动（单枚举 launch.mode，无优先级叠加）：integrated→createTerminal；window→spawnDshVisible；hidden→spawnDsh 静默；
  * window-keepalive→spawnStandalone(showWindow=1 弹窗独立)；hidden-keepalive→spawnStandalone(showWindow=0 静默独立)，
  *  且仅当 windowsHidePatch=true 时先 patch.isApplied 检测、未打则 createTerminal 发送 patch.buildPatchCommand 补丁命令；
@@ -36,6 +38,7 @@
  * - 已有存活 child 再 open：复用 waitForPort，不重复 spawn
  * - resolveDsh 为 null 时报错且不 spawn
  * - 端口等待超时报错且不 open
+ * - readSettings 用点式键读 launch.mode / experimental.windowsHidePatch，产出扁平字段 launchMode / windowsHidePatch
  * - 启动日志写入 outputChannel，失败弹窗附 stderr 摘要
  * - stop 无 child 时提示且不抛异常
  * - dispose 静默终止 child（不弹消息），无 child 时安全返回；keepalive 模式（window-keepalive/hidden-keepalive）时不终止
@@ -130,8 +133,8 @@ function createManager(deps) {
       port: cfg.get('port'),
       dshPath: cfg.get('dshPath'),
       patchFile: cfg.get('patchFile'),
-      launchMode: cfg.get('launchMode'),
-      windowsHidePatch: cfg.get('windowsHidePatch'),
+      launchMode: cfg.get('launch.mode'),
+      windowsHidePatch: cfg.get('experimental.windowsHidePatch'),
       openWith: cfg.get('openWith'),
       multipleTabs: cfg.get('multipleTabs'),
     };

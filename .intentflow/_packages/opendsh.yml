@@ -56,3 +56,11 @@ groups:
       - scripts/patch-dsh-windows-hide.mjs
       - docs/dsh-windows-console-window-issue.md
       - .vscodeignore
+  - name: 扩展声明与用户文档
+    summary: package.json（命令 opendsh.open / opendsh.stop、标题栏菜单、设置键声明）与 README（中英用户文档），
+      构成扩展的对外声明层；与运行时 src/ 分离但必须同步——命令 ID、设置键、版本号任一变更须同改这两份。
+      opendsh.launch.mode / opendsh.experimental.windowsHidePatch 是嵌套设置键（readSettings 用点式键读取），
+      openWith 纯 settings 决定（无面板、无状态记忆）。
+    files:
+      - package.json
+      - README.md
