@@ -71,7 +71,7 @@
 ## 安装
 
 用 `npx @vscode/vsce package` 打包出 `.vsix` 后安装；或把本目录复制到扩展目录下，命名为
-`TheChengXi.opendsh-0.1.0`，然后重载窗口。
+`TheChengXi.opendsh-0.1.1`，然后重载窗口。
 
 ## 测试
 
@@ -158,7 +158,7 @@ and can start / stop the `dsh web` server for the current workspace.
 ## Install
 
 Build a `.vsix` with `npx @vscode/vsce package`, then install it; or copy this folder into
-your extensions directory as `TheChengXi.opendsh-0.1.0` and reload the window.
+your extensions directory as `TheChengXi.opendsh-0.1.1` and reload the window.
 
 ## Test
 
