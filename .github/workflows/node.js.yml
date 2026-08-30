@@ -1,0 +1,31 @@
+# 此工作流将执行 Node 依赖的全新安装，缓存/恢复它们，构建源代码，并在不同版本的 Node 上运行测试。
+# 更多信息请参阅：https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
+
+名称：Node.js CI: Node.js CI
+
+在：:
+  推送：:
+    分支: [ "main" ]: [ "main" ]
+  拉取请求：:
+    分支: [ "main" ]: [ "main" ]
+
+职位：:
+  构建：:
+
+    运行环境：ubuntu-latest: ubuntu-latest
+
+    策略：:
+      矩阵：:
+        node-version: [18.x, 20.x, 22.x]: [18.x, 20.x, 22.x]
+        # 查看支持的 Node.js 版本发布计划，请访问 https://nodejs.org/en/about/releases/# See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+    步骤：:
+    - 用法：actions/checkout@v4uses: actions/checkout@v4
+    - name: 使用 Node.js ${{ matrix.node-version }}name: Use Node.js ${{ matrix.node-version }}
+      使用：actions/setup-node@v4: actions/setup-node@v4
+      使用：:
+        node-version: ${{ matrix.node-version }}: ${{ matrix.node-version }}
+        缓存：'npm': 'npm'
+    - 运行: npm cirun: npm ci
+    - 运行: npm run build --if-presentrun: npm run build --if-present
+    - 运行: npm testrun: npm test
