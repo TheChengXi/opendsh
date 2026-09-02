@@ -6,4 +6,6 @@ test/**
 .gitignore
 docs/**
 scripts/**
+AGENTS.md
+.github/**
 *.vsix
