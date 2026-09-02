@@ -2,7 +2,7 @@
  * @intent
  * manager.js 的 node:test 编排测试，注入假 detect/process/webview/patch/vscode 断言决策顺序与边界。
  *
- * 验收条件：node --test 全绿，覆盖 open 自动启动、启动去重复用 child、端口占用归属判定、无工作区报错、
+ * 验收条件：node --test 全绿，覆盖 open 自动启动、启动去重复用 child、端口占用归属判定、stop 后残窗内 open 等待端口释放、无工作区报错、
  * resolveDsh null 快速失败、端口超时报错、webview 单例/复用 reveal/重启重载/关页重建/创建失败回退、
  * 打开方式分叉（systemBrowser/simpleBrowser/multipleTabs/tab）、channel 日志、stop 无 child 提示、
  * pid 文件读写、五模式分发（integrated 终端 / window 桌面窗口 / hidden 静默 / window-keepalive 弹窗独立 / hidden-keepalive 静默独立+可选补丁）。
@@ -33,6 +33,7 @@ function makeHarness(opts) {
     killedPid: null,
     waited: null,
     waitedCount: 0,
+    portRelease: null,
     channel: null,
     patchAppliedChecks: 0,
     terminals: [],
@@ -64,6 +65,10 @@ function makeHarness(opts) {
     waitForPort: async (host, port) => {
       calls.waited = { host, port };
       calls.waitedCount++;
+      return true;
+    },
+    waitForPortRelease: async (host, port) => {
+      calls.portRelease = { host, port };
       return true;
     },
     killDsh: async () => {
@@ -185,6 +190,8 @@ function makeHarness(opts) {
     patch: fakePatch,
     vscode,
     debounceMs: opts.debounceMs !== undefined ? opts.debounceMs : 0,
+    stopResidualMs: opts.stopResidualMs !== undefined ? opts.stopResidualMs : 5000,
+    portReleaseTimeoutMs: opts.portReleaseTimeoutMs !== undefined ? opts.portReleaseTimeoutMs : 5000,
   });
   return { manager, calls };
 }
@@ -300,6 +307,56 @@ test('stop kills tracked child then clears it', async () => {
   await h.manager.stop();
   assert.strictEqual(h.calls.killed, true);
   assert.strictEqual(h.manager.getChild(), null);
+});
+
+test('open after stop waits for port release before respawning', async () => {
+  let releaseCalled = 0;
+  const h = makeHarness({
+    process: {
+      waitForPortRelease: async () => {
+        releaseCalled++;
+        return true;
+      },
+    },
+  });
+  await h.manager.open();
+  assert.strictEqual(h.calls.spawnCount, 1);
+  await h.manager.stop();
+  assert.strictEqual(h.calls.killed, true);
+
+  await h.manager.open(); // stop 残窗内：先等待端口释放，再重新 spawn
+  assert.strictEqual(releaseCalled, 1);
+  assert.strictEqual(h.calls.spawnCount, 2);
+});
+
+test('open after stop reports error when port not released in time', async () => {
+  const h = makeHarness({
+    process: {
+      waitForPortRelease: async () => false, // 端口一直未释放
+    },
+  });
+  await h.manager.open();
+  await h.manager.stop();
+  await h.manager.open();
+  assert.strictEqual(h.calls.spawnCount, 1); // 第二次没再 spawn
+  assert.ok(h.calls.messages.some((x) => x.kind === 'error' && x.m.includes('did not stop in time')));
+});
+
+test('open after stop with zero residual window skips release wait', async () => {
+  let releaseCalled = 0;
+  const h = makeHarness({
+    stopResidualMs: 0,
+    process: {
+      waitForPortRelease: async () => {
+        releaseCalled++;
+        return true;
+      },
+    },
+  });
+  await h.manager.open();
+  await h.manager.stop();
+  await h.manager.open(); // 残窗为 0，不进入释放等待，直接走正常 isPortInUse
+  assert.strictEqual(releaseCalled, 0);
 });
 
 test('open reuses existing child instead of duplicate spawn', async () => {

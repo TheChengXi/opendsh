@@ -1,69 +1,32 @@
-# dsh-upgrade-compatibility 关账报告
+# dsh-upgrade-compatibility 关账报告（第二迭代）
 
 ## 1. 项目概览
-修复 opendsh VS Code 扩展在 DSH 升级后出现的功能失效问题——静默启动失效（控制台窗口弹出）、打开位置失效（总是额外打开系统浏览器）。
+让 opendsh 的 open/stop 命令对 dsh 本体升级鲁棒——dsh 升级后手动 Stop/Open 直接可用，不再需要改源码、重新编译、重装扩展。
 
 ## 2. 计划 vs 实际
-
-- **计划功能清单**：
-  1. 静默启动修复：DSH 服务启动时不弹出 Windows 控制台窗口
-  2. 打开位置修复：DSH 页面按 `opendsh.openWith` 配置在指定位置打开，不额外打开系统浏览器
-  3. 补丁脚本重跑：`scripts\patch-dsh-windows-hide.mjs` 补丁脚本需要重新运行
-
-- **实际完成状态**：
-  1. ✅ 静默启动修复 — 通过运行 `patch-dsh-windows-hide.mjs` 补丁脚本，成功添加 `windowsHide: platform === "win32"` 参数
-  2. ✅ 打开位置修复 — 在 `buildDshArgs()` 函数中添加 `--no-open` 参数，禁用 DSH 的自动打开浏览器行为
-  3. ✅ 补丁脚本重跑 — 补丁脚本已成功运行，`dsh-subprocess-local/lib/index.js` 中已有 `windowsHide: platform === "win32"` 参数
+- ✅ resolveDsh 去 `lib/bin.js` 硬编码：改为 `dshPath > PATH shim > npm 全局（读 package.json bin）`，并删除失效的 npm prefix 探测。
+- ✅ buildDshArgs 收敛为最小稳定参数集（web / --patch 可选 / --host 非默认才传 / --port / --no-open），单测锁死。
+- ✅ stop→open「刚停残留」判定：stop 打点 lastStopAt，ensureReady 残窗内等待端口释放、超时报错，修掉端口误判竞态。
+- ❌ 日志/诊断增强：requirement 曾列为核心功能 3，用户明确「没必要做日志」，从范围移除。
 
 ## 3. 关键决策
-
-1. **添加 `--no-open` 参数**：DSH web 应用默认会打开浏览器（`openBrowser: true`），这是 DSH 内部行为。通过在启动参数中添加 `--no-open`，禁用 DSH 的自动打开浏览器行为，由 opendsh 扩展控制打开方式。
-
-2. **添加调试日志**：在 `readSettings()`、`openWebview()`、`spawnDsh()` 等函数中添加调试日志，便于追踪配置读取和执行流程。
+- **resolveNpmGlobal 精简为「仅 Windows APPDATA + 读 package.json bin」**：比 design 预期的「修复 npm prefix 注入」更进一步——直接删除 runNpmPrefix/cachedNpmPrefix，POSIX 交由 PATH 的 dsh 可执行脚本覆盖。与 design 方向一致（去硬编码、按 bin 字段），实现更精简，同时消除了「resolveDsh 未传 deps」的隐性 bug。
+- **waitForPortRelease 落在 process.js**：design 只说「等待端口释放的确定性判定」，落点由 execute 定为 process 能力层（与 waitForPort 对称），不纳入 manager，保持分层干净。
 
 ## 4. 经验记录
-
-- **有效做法**：
-  - 通过分析 DSH 源码（`dsh-web-app/lib/index.js`）发现 `openBrowser` 配置默认为 `true`，这是系统浏览器额外打开的根本原因
-  - 使用 `--no-open` 参数禁用 DSH 的自动打开浏览器行为，简单有效
-  - 运行 `patch-dsh-windows-hide.mjs` 补丁脚本修复控制台窗口弹出问题
-
-- **踩坑**：
-  - 最初误以为问题在 DSH 的 `dsh-subprocess-local` 模块，实际上控制台窗口弹出是因为该模块缺少 `windowsHide` 参数
-  - 系统浏览器额外打开是因为 DSH web 应用默认 `openBrowser: true`，需要通过 `--no-open` 参数禁用
-
-- **工具反馈**：
-  - `patch-dsh-windows-hide.mjs` 补丁脚本需要管理员权限才能运行（Windows 文件权限问题）
-  - 调试日志对于追踪配置读取和执行流程非常有帮助
+- 有效做法：先用 git log（c0ae911 / 7512336）定位历史契约断点，再读 dsh 本体的 bin.js / startup.js 确认当前 CLI 两层结构，把「脆弱耦合」从猜测升为三重证据（git + 历史文档 + 代码），比盲改参数高效得多。
+- 踩坑：「重编译重装=好使」其实是 autoStart 冷启动兜底掩盖了手动链路问题——排障时不能只看结果「好使」，要分清是哪条路径好使。
+- 工具反馈：沙箱下 `node --test` 默认按进程隔离会 spawn 子进程（stdio pipe）触发 `spawn EPERM`，需 `node --test --test-isolation=none`；与代码无关但会误导「测试全挂」。
 
 ## 5. 后续待办
-
-- **立即跟进**：
-  - 重新加载 VS Code 扩展，测试静默启动和打开位置功能是否正常工作
-  - 如果还有问题，查看输出面板中的 DSH 日志，追踪配置读取和执行流程
-
-- **长期备忘**：
-  - DSH 升级会覆盖 `node_modules`，需重新运行 `patch-dsh-windows-hide.mjs` 补丁脚本
-  - 考虑将 `--no-open` 参数添加到 opendsh 扩展的配置中，让用户可以选择是否禁用 DSH 的自动打开浏览器行为
+- 立即跟进：真实 VS Code 里实测一次 dsh 升级后手动 Stop→Open，验证竞态修复端到端效果；重新加载/重装扩展使本次改动生效。
+- 长期备忘：见 `D:\w_dev\openDSH\.intentflow\dsh-upgrade-compatibility\later-on.md`（L01 日志体系 / L02 契约探测 / L03 版本感知 / L04 转义风险回退）。
 
 ## 6. 开发工作流反馈
-
-- **流程断点**：
-  - 最初没有正确理解用户的问题，误以为问题在 DSH 的 `dsh-subprocess-local` 模块
-  - 需要更多的调试日志来追踪配置读取和执行流程
-
-- **skill 缺失**：
-  - 需要一个更好的方式来追踪配置读取和执行流程
-  - 需要一个更好的方式来测试配置是否正确应用
-
-- **工具链瓶颈**：
-  - `patch-dsh-windows-hide.mjs` 补丁脚本需要管理员权限才能运行
-  - 调试日志需要手动添加到代码中
+- 流程断点：requirement 阶段把「手动无反应机制」标 ⏸ 待运行时验证，最终靠 design 阶段从「autoStart 冷启动 vs 手动热切换」推演出竞态根因，而非运行时日志——纯静态分析能收敛，但需在 design 阶段主动归因「为什么同源却表现不同」。
+- skill 缺失：无（requirement→design→execute→report 链路跑通）。
+- 工具链瓶颈：node --test 的 process isolation 与沙箱冲突，建议在项目文档/脚本固化 `--test-isolation=none`。
 
 ## 7. 结论
-
-- **当前状态**：可发布
-- **建议下一步**：
-  1. 重新加载 VS Code 扩展，测试静默启动和打开位置功能是否正常工作
-  2. 如果还有问题，查看输出面板中的 DSH 日志，追踪配置读取和执行流程
-  3. 考虑将 `--no-open` 参数添加到 opendsh 扩展的配置中，让用户可以选择是否禁用 DSH 的自动打开浏览器行为
+- 当前状态：可发布（102 测试全绿，稳定循环 3 次通过）。
+- 建议下一步：真实 VS Code 端到端验证一次 dsh 升级场景后发布；后续 dsh 升级以 `node --test --test-isolation=none` 全绿作为契约未破的判据。

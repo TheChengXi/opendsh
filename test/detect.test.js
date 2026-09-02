@@ -1,10 +1,12 @@
 /**
  * @intent
- * detect.js 的 node:test 单测，覆盖设置回退、工作区解析、patch 发现、dsh 定位优先级（dshPath > npm 全局 > PATH，落空 null）、
+ * detect.js 的 node:test 单测，覆盖设置回退、工作区解析、patch 发现、dsh 定位优先级（dshPath > PATH shim > npm 全局读 bin，落空 null）、
  * buildUrl、launchMode 枚举、windowsHidePatch 回退。
  *
  * 验收条件：node --test 全绿；launchMode 仅 5 个合法值、其余（含旧 showWindow/detached/experimentalSilentKeepAlive 遗留）回退 integrated；
- * windowsHidePatch 非 true 回退 false；openWith 合法值为 tab/simpleBrowser/systemBrowser（其余回退 tab）。
+ * windowsHidePatch 非 true 回退 false；openWith 合法值为 tab/simpleBrowser/systemBrowser（其余回退 tab）；
+ * resolveDsh 优先 dshPath，其次 PATH 的 dsh 命令，最后 npm 全局（读 package.json bin 字段）；
+ * resolveNpmGlobal 按 package.json bin 字段定位真实入口，非 Windows / 无 package.json / 无 bin 返回 null。
  */
 
 'use strict';
@@ -136,100 +138,98 @@ test('resolveDsh priority = dshPath > PATH > null (no npx fallback)', async () =
   assert.strictEqual(await detect.resolveDsh({ dshPath: '' }, { pathEnv: '', isWin: false }), null);
 });
 
-test('resolveNpmGlobal finds global install via npm prefix -g', async () => {
+test('resolveNpmGlobal locates entry via package.json bin string', () => {
   const d = freshDetect();
-  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-prefix-'));
+  const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-bin-'));
   try {
-    const bin = path.join(prefix, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-    fs.mkdirSync(path.dirname(bin), { recursive: true });
-    fs.writeFileSync(bin, '');
-    const r = await d.resolveNpmGlobal({
-      isWin: true,
-      env: {},
-      nodePath: 'node.exe',
-      execFile: (cmd, args, cb) => cb(null, prefix),
-    });
-    assert.deepStrictEqual(r, { command: 'node.exe', prefixArgs: [bin] });
-  } finally {
-    fs.rmSync(prefix, { recursive: true, force: true });
-  }
-});
-
-test('resolveNpmGlobal caches npm prefix and does not re-spawn', async () => {
-  const d = freshDetect();
-  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-prefix2-'));
-  try {
-    const bin = path.join(prefix, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-    fs.mkdirSync(path.dirname(bin), { recursive: true });
-    fs.writeFileSync(bin, '');
-    let calls = 0;
-    const execFile = (cmd, args, cb) => {
-      calls++;
-      cb(null, prefix);
-    };
-    await d.resolveNpmGlobal({ isWin: false, env: {}, nodePath: 'node', execFile });
-    const second = await d.resolveNpmGlobal({ isWin: false, env: {}, nodePath: 'node', execFile });
-    assert.strictEqual(calls, 1);
-    assert.deepStrictEqual(second, { command: 'node', prefixArgs: [bin] });
-  } finally {
-    fs.rmSync(prefix, { recursive: true, force: true });
-  }
-});
-
-test('resolveNpmGlobal APPDATA fast path hits without spawning', async () => {
-  const d = freshDetect();
-  const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-appdata-'));
-  try {
-    const bin = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-    fs.mkdirSync(path.dirname(bin), { recursive: true });
-    fs.writeFileSync(bin, '');
-    const r = await d.resolveNpmGlobal({
-      isWin: true,
-      env: { APPDATA: appData },
-      nodePath: 'node.exe',
-      execFile: () => {
-        throw new Error('should not spawn npm prefix');
-      },
-    });
-    assert.deepStrictEqual(r, { command: 'node.exe', prefixArgs: [bin] });
+    const pkgDir = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ bin: 'lib/cli.js' }));
+    const entry = path.join(pkgDir, 'lib', 'cli.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '');
+    const r = d.resolveNpmGlobal({ isWin: true, env: { APPDATA: appData }, nodePath: 'node.exe' });
+    assert.deepStrictEqual(r, { command: 'node.exe', prefixArgs: [entry] });
   } finally {
     fs.rmSync(appData, { recursive: true, force: true });
   }
 });
 
-test('resolveNpmGlobal returns null when global install absent', async () => {
+test('resolveNpmGlobal resolves object bin.dsh', () => {
   const d = freshDetect();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-noglob-'));
+  const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-binobj-'));
   try {
-    const r = await d.resolveNpmGlobal({
-      isWin: true,
-      env: { APPDATA: dir },
-      nodePath: 'node.exe',
-      execFile: (cmd, args, cb) => cb(null, dir),
-    });
-    assert.strictEqual(r, null);
+    const pkgDir = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ bin: { dsh: 'dist/cli.js' } }));
+    const entry = path.join(pkgDir, 'dist', 'cli.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '');
+    const r = d.resolveNpmGlobal({ isWin: true, env: { APPDATA: appData }, nodePath: 'node.exe' });
+    assert.deepStrictEqual(r, { command: 'node.exe', prefixArgs: [entry] });
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(appData, { recursive: true, force: true });
   }
 });
 
-test('resolveDsh prefers npm global over PATH', async () => {
+test('resolveNpmGlobal returns null when package.json / bin / win missing', () => {
+  const d = freshDetect();
+  const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-nobin-'));
+  try {
+    const pkgDir = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    // 无 package.json
+    assert.strictEqual(d.resolveNpmGlobal({ isWin: true, env: { APPDATA: appData }, nodePath: 'node.exe' }), null);
+    // 有 package.json 但无 bin
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'dsh' }));
+    assert.strictEqual(d.resolveNpmGlobal({ isWin: true, env: { APPDATA: appData }, nodePath: 'node.exe' }), null);
+    // 非 Windows
+    assert.strictEqual(d.resolveNpmGlobal({ isWin: false, env: { APPDATA: appData }, nodePath: 'node' }), null);
+  } finally {
+    fs.rmSync(appData, { recursive: true, force: true });
+  }
+});
+
+test('resolveDsh prefers PATH shim over npm global', async () => {
   const d = freshDetect();
   const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-resolve-appdata-'));
   const pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-resolve-path-'));
   try {
-    const bin = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-    fs.mkdirSync(path.dirname(bin), { recursive: true });
-    fs.writeFileSync(bin, '');
+    const pkgDir = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ bin: 'lib/bin.js' }));
+    const entry = path.join(pkgDir, 'lib', 'bin.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '');
     fs.writeFileSync(path.join(pathDir, 'dsh.cmd'), '');
     const r = await d.resolveDsh(
       { dshPath: '' },
       { isWin: true, env: { APPDATA: appData }, nodePath: 'node.exe', pathEnv: pathDir }
     );
-    assert.deepStrictEqual(r, { command: 'node.exe', prefixArgs: [bin] });
+    assert.deepStrictEqual(r, { command: path.join(pathDir, 'dsh.cmd'), prefixArgs: [] });
   } finally {
     fs.rmSync(appData, { recursive: true, force: true });
     fs.rmSync(pathDir, { recursive: true, force: true });
+  }
+});
+
+test('resolveDsh falls back to npm global when PATH misses', async () => {
+  const d = freshDetect();
+  const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-resolve-noglob-'));
+  try {
+    const pkgDir = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ bin: 'lib/bin.js' }));
+    const entry = path.join(pkgDir, 'lib', 'bin.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '');
+    const r = await d.resolveDsh(
+      { dshPath: '' },
+      { isWin: true, env: { APPDATA: appData }, nodePath: 'node.exe', pathEnv: '' }
+    );
+    assert.deepStrictEqual(r, { command: 'node.exe', prefixArgs: [entry] });
+  } finally {
+    fs.rmSync(appData, { recursive: true, force: true });
   }
 });
 
@@ -290,16 +290,19 @@ test('resolveNode returns command name node as last resort', () => {
   assert.strictEqual(r, 'node');
 });
 
-test('resolveNpmGlobal uses resolved node path not execPath', async () => {
+test('resolveNpmGlobal uses resolved node path not execPath', () => {
   const d = freshDetect();
   const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-appdata-node-'));
   const pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-node-path-'));
   try {
-    const bin = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
-    fs.mkdirSync(path.dirname(bin), { recursive: true });
-    fs.writeFileSync(bin, '');
+    const pkgDir = path.join(appData, 'npm', 'node_modules', '@deepseek-ai', 'dsh');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ bin: 'lib/bin.js' }));
+    const entry = path.join(pkgDir, 'lib', 'bin.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '');
     fs.writeFileSync(path.join(pathDir, 'node.exe'), '');
-    const r = await d.resolveNpmGlobal({
+    const r = d.resolveNpmGlobal({
       isWin: true,
       env: { APPDATA: appData },
       execPath: 'C:/Program Files/Microsoft VS Code/Code.exe',
@@ -307,7 +310,7 @@ test('resolveNpmGlobal uses resolved node path not execPath', async () => {
     });
     // command 必须是 PATH 解析出的 node.exe，而不是 Code.exe
     assert.strictEqual(r.command, path.join(pathDir, 'node.exe'));
-    assert.deepStrictEqual(r.prefixArgs, [bin]);
+    assert.deepStrictEqual(r.prefixArgs, [entry]);
   } finally {
     fs.rmSync(appData, { recursive: true, force: true });
     fs.rmSync(pathDir, { recursive: true, force: true });

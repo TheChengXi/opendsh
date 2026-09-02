@@ -14,6 +14,7 @@
  *
  * 边界：端口未监听且无工作区时报错返回不抛异常；resolveDsh 返回 null 时快速失败提示配置/安装 dsh；
  * spawn 失败报错返回；端口等待超时报错且不打开；端口被非 dsh 进程占用（无 child 且 httpProbe 不匹配）时报错不打开；
+ * stop 后短残窗内 open 视为「刚停残留」：等待端口释放后再启动，超时未释放报错（区别于外部 dsh 直开/其他程序占用）；
  * stop 无记录实例时仅提示不抛异常；createWebviewPanel 抛错回退 openExternal；
  * 标签页关闭（onDidDispose）仅清面板引用，不触碰子进程；
  * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal。
@@ -34,6 +35,7 @@
  * - onDidDispose 清引用后再次 open 重新创建面板
  * - createWebviewPanel 抛错时回退 openExternal
  * - 端口被其他程序占用（无 child 且探测不匹配）报错不打开
+ * - stop 后残窗内 open 等待端口释放后重新 spawn，超时报错；残窗过后端口在占用则按外部 dsh/其他程序判定
  * - 端口未监听且无工作区时报错且不 spawn
  * - 已有存活 child 再 open：复用 waitForPort，不重复 spawn
  * - resolveDsh 为 null 时报错且不 spawn
@@ -68,7 +70,10 @@ function createManager(deps) {
   let stderrTail = '';
   let startedKeepAlive = false; // 启动时记录的独立存活模式（window-keepalive/hidden-keepalive），dispose 用它而非关闭时读配置
   let lastOpenAt = 0; // 防连点节流时间戳
+  let lastStopAt = 0; // 最近一次 stop 时刻；残窗内 open 视为「刚停残留」等待端口释放
   const debounceMs = Number.isInteger(deps.debounceMs) && deps.debounceMs >= 0 ? deps.debounceMs : 300;
+  const stopResidualMs = Number.isInteger(deps.stopResidualMs) && deps.stopResidualMs >= 0 ? deps.stopResidualMs : 5000;
+  const portReleaseTimeoutMs = Number.isInteger(deps.portReleaseTimeoutMs) && deps.portReleaseTimeoutMs >= 0 ? deps.portReleaseTimeoutMs : 5000;
   const channel =
     typeof vscode.window.createOutputChannel === 'function'
       ? vscode.window.createOutputChannel('DSH')
@@ -221,6 +226,20 @@ function createManager(deps) {
   // reload=true 表示服务刚启动或刚复用（新 spawn / 复用 child），打开时需重设 html 强制刷新。
   async function ensureReady(config) {
     const port = config.port;
+
+    // 刚 stop 后的残留：旧进程尚在退出、端口未释放。等待释放后再走正常启动路径，
+    // 避免把残留旧进程误判为「外部 dsh 仍在运行」而直接打开旧服务。
+    if (Date.now() - lastStopAt < stopResidualMs) {
+      const released = await proc.waitForPortRelease(config.host, port, { timeoutMs: portReleaseTimeoutMs });
+      if (!released) {
+        vscode.window.showErrorMessage(
+          'DSH: previous instance did not stop in time (port ' + port + ' still in use).'
+        );
+        return { ready: false, reload: false };
+      }
+      lastStopAt = 0; // 释放完成，清除残留标记
+    }
+
     if (await proc.isPortInUse(config.host, port)) {
       if (child && !child.killed) {
         log('port ' + port + ' listening (child pid=' + child.pid + '); opening');
@@ -379,6 +398,7 @@ function createManager(deps) {
       const t = terminal;
       terminal = null;
       t.dispose();
+      lastStopAt = Date.now(); // 记录停止时刻，供 open 的「刚停残留」判定
       stderrTail = '';
       startedKeepAlive = false;
       vscode.window.showInformationMessage('DSH: stopped.');
@@ -386,6 +406,7 @@ function createManager(deps) {
     }
     if (child) {
       const stopped = await proc.killDsh(child);
+      lastStopAt = Date.now(); // 记录停止时刻，供 open 的「刚停残留」判定
       child = null;
       stderrTail = '';
       startedKeepAlive = false;
@@ -417,6 +438,7 @@ function createManager(deps) {
       return;
     }
     const stopped = await proc.killPid(pid);
+    lastStopAt = Date.now(); // 记录停止时刻，供 open 的「刚停残留」判定
     if (stopped) {
       removePidFile(workspace);
       vscode.window.showInformationMessage('DSH: stopped.');

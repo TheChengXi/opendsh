@@ -1,16 +1,16 @@
 /**
  * @intent
- * 跨平台 DSH 进程与端口适配：拼 spawn 参数、spawn/kill 子进程、探测端口占用、等待端口就绪、HTTP 探测端口归属。
+ * 跨平台 DSH 进程与端口适配：拼 spawn 参数、spawn/kill 子进程、探测端口占用、等待端口就绪/释放、HTTP 探测端口归属。
  *
  * 边界：spawnDsh 静默 spawn（detached + stdio:[ignore,ignore,pipe] + windowsHide，stderr 可诊断）；spawnDshVisible 桌面窗口 spawn（stdio:inherit + detached:false，输出直写窗口不经过 pipe）；
- * direct 模式（node + bin.js 真实入口）直接 spawn 不经 cmd shim，仅 PATH 兜底命中的 .cmd 才走 shell；
+ * direct 模式（node + 真实入口）直接 spawn 不经 cmd shim，PATH 命中 .cmd 才走 shell；
  * kill 在 Windows 用 taskkill /T /F 树杀，POSIX 用 child.kill；
  * httpProbe 以 2xx + body 含 __DSH_BOOT__ 判定端口归属 dsh，用于区分「外部手动起的 dsh」与「其他程序占用」。
  *
  * 验收条件：
- * - buildDshArgs 顺序 = [prefix..., web, --patch p..., --host host, --port port]（--patch 必须在 --host/--port 前，否则 dsh 报 unknown option）
+ * - buildDshArgs 只输出最小稳定参数：恒拼 web；有 patch 才拼 --patch（置于 --host/--port 前）；host 非默认 127.0.0.1 才拼 --host；恒拼 --port、--no-open
  * - isPortInUse 对真实监听端口返回 true，空闲端口返回 false（未监听探测超时 100ms）
- * - waitForPort 端口在超时内就绪返回 true，超时返回 false
+ * - waitForPort 端口在超时内就绪返回 true，超时返回 false；waitForPortRelease 端口在超时内释放返回 true，超时返回 false
  * - spawnDsh 统一静默（stdio pipe stderr + windowsHide + detached）；spawnDshVisible 桌面窗口（stdio inherit + detached false）；direct 模式 shell:false；.cmd 兜底模式 shell:true
  * - httpProbe 对 dsh 特征响应返回 true，非 dsh 响应/连接失败返回 false
  * - killDsh 在 win 拼 taskkill /pid <pid> /T /F，非 win 调 child.kill；killPid 按纯 pid 杀（无 child 对象，POSIX 用 process.kill）
@@ -31,7 +31,9 @@ function buildDshArgs(resolved, opts) {
   if (Array.isArray(r.prefixArgs)) args.push(...r.prefixArgs);
   args.push('web');
   for (const p of patches) args.push('--patch', p);
-  args.push('--host', o.host, '--port', String(o.port));
+  // host 默认 127.0.0.1 时省去（dsh web 默认即 loopback）；仅显式配置非默认 host 才显式传
+  if (o.host && o.host !== '127.0.0.1') args.push('--host', o.host);
+  args.push('--port', String(o.port));
   // 禁用 DSH 自动打开浏览器：由 opendsh 扩展控制打开方式，不由 DSH 自身决定
   args.push('--no-open');
   return args;
@@ -180,6 +182,23 @@ function waitForPort(host, port, opts) {
   return poll();
 }
 
+function waitForPortRelease(host, port, opts) {
+  const o = opts || {};
+  const timeoutMs = o.timeoutMs !== undefined ? o.timeoutMs : 5000;
+  const intervalMs = o.intervalMs !== undefined ? o.intervalMs : 250;
+  const probe = o.probe || isPortInUse;
+  const sleep = o.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const deadline = Date.now() + timeoutMs;
+  const poll = async () => {
+    for (;;) {
+      if (!(await probe(host, port))) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(intervalMs);
+    }
+  };
+  return poll();
+}
+
 function httpProbe(host, port, opts) {
   const o = opts || {};
   const timeoutMs = o.timeoutMs !== undefined ? o.timeoutMs : 1000;
@@ -255,6 +274,7 @@ module.exports = {
   spawnStandalone,
   isPortInUse,
   waitForPort,
+  waitForPortRelease,
   httpProbe,
   killPid,
   killDsh,

@@ -1,9 +1,11 @@
 /**
  * @intent
- * process.js 的 node:test 单测，覆盖参数拼接、端口探测（真实 socket）、spawn 静默/桌面窗口分支、buildTerminalCommand、
- * HTTP 归属探测、kill 树杀参数。
+ * process.js 的 node:test 单测，覆盖参数拼接（最小稳定参数集）、端口探测（真实 socket）、spawn 静默/桌面窗口分支、
+ * buildTerminalCommand、HTTP 归属探测、kill 树杀参数、等待端口就绪/释放。
  *
  * 验收条件：node --test 全绿，只 mock spawn / taskkill / execFile 系统边界，不 mock 内部协作者；
+ * buildDshArgs 恒拼 web/--port/--no-open，有 patch 才拼 --patch，host 非默认才拼 --host；
+ * waitForPort 等到端口就绪返回 true，waitForPortRelease 等到端口释放返回 true，超时各返回 false；
  * spawnDsh 统一静默（stdio pipe + windowsHide + detached）；spawnDshVisible 桌面窗口（stdio inherit + detached false）；
  * buildTerminalCommand 输出单行命令串。
  */
@@ -28,8 +30,6 @@ test('buildDshArgs builds ordered args with prefix and patches', () => {
     'a.yml',
     '--patch',
     'b.yml',
-    '--host',
-    '127.0.0.1',
     '--port',
     '3080',
     '--no-open',
@@ -41,7 +41,23 @@ test('buildDshArgs prepends npx prefix', () => {
     { command: 'npx', prefixArgs: ['@deepseek-ai/dsh'] },
     { host: '127.0.0.1', port: 3080, patches: [] }
   );
-  assert.deepStrictEqual(args, ['@deepseek-ai/dsh', 'web', '--host', '127.0.0.1', '--port', '3080', '--no-open']);
+  assert.deepStrictEqual(args, ['@deepseek-ai/dsh', 'web', '--port', '3080', '--no-open']);
+});
+
+test('buildDshArgs omits --host for default and includes it when non-default', () => {
+  const base = { command: 'dsh', prefixArgs: [] };
+  assert.deepStrictEqual(
+    proc.buildDshArgs(base, { host: '127.0.0.1', port: 3080, patches: [] }),
+    ['web', '--port', '3080', '--no-open']
+  );
+  assert.deepStrictEqual(
+    proc.buildDshArgs(base, { host: 'localhost', port: 8080, patches: [] }),
+    ['web', '--host', 'localhost', '--port', '8080', '--no-open']
+  );
+  assert.deepStrictEqual(
+    proc.buildDshArgs(base, { port: 3080, patches: [] }),
+    ['web', '--port', '3080', '--no-open']
+  );
 });
 
 test('spawnDsh non-win spawns directly without shell', () => {
@@ -56,7 +72,7 @@ test('spawnDsh non-win spawns directly without shell', () => {
     fakeSpawn
   );
   assert.strictEqual(captured.cmd, 'dsh');
-  assert.deepStrictEqual(captured.args, ['web', '--host', '127.0.0.1', '--port', '3080', '--no-open']);
+  assert.deepStrictEqual(captured.args, ['web', '--port', '3080', '--no-open']);
   assert.strictEqual(captured.opts.shell, false);
   assert.strictEqual(captured.opts.detached, true);
   assert.deepStrictEqual(captured.opts.stdio, ['ignore', 'ignore', 'pipe']);
@@ -79,8 +95,6 @@ test('spawnDsh win .cmd fallback spawns with shell true and windowsHide', () => 
     'web',
     '--patch',
     'C:/ws/.dsh/a.patch.yml',
-    '--host',
-    '127.0.0.1',
     '--port',
     '8080',
     '--no-open',
@@ -106,8 +120,6 @@ test('spawnDsh win direct (node + bin.js) spawns without shell', () => {
   assert.deepStrictEqual(captured.args, [
     'C:/npm/node_modules/@deepseek-ai/dsh/lib/bin.js',
     'web',
-    '--host',
-    '127.0.0.1',
     '--port',
     '8080',
     '--no-open',
@@ -183,6 +195,36 @@ test('waitForPort resolves false on timeout', async () => {
   assert.strictEqual(ok, false);
 });
 
+test('waitForPortRelease resolves true when port already released', async () => {
+  const ok = await proc.waitForPortRelease('127.0.0.1', 3080, {
+    timeoutMs: 100,
+    intervalMs: 5,
+    probe: async () => false,
+  });
+  assert.strictEqual(ok, true);
+});
+
+test('waitForPortRelease polls until probe becomes false', async () => {
+  let n = 0;
+  const probe = async () => ++n < 3; // 前两次占用，第三次释放
+  const ok = await proc.waitForPortRelease('127.0.0.1', 3080, {
+    timeoutMs: 100,
+    intervalMs: 5,
+    probe,
+  });
+  assert.strictEqual(ok, true);
+  assert.strictEqual(n, 3);
+});
+
+test('waitForPortRelease resolves false on timeout', async () => {
+  const ok = await proc.waitForPortRelease('127.0.0.1', 3080, {
+    timeoutMs: 30,
+    intervalMs: 5,
+    probe: async () => true,
+  });
+  assert.strictEqual(ok, false);
+});
+
 test('httpProbe true on dsh-like response', async () => {
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -253,7 +295,7 @@ test('buildTerminalCommand joins command and args in order', () => {
     { command: 'C:/node/node.exe', prefixArgs: ['C:/bin.js'] },
     { host: '127.0.0.1', port: 3080, patches: [], cwd: 'C:/ws' }
   );
-  assert.strictEqual(cmd, 'C:/node/node.exe C:/bin.js web --host 127.0.0.1 --port 3080 --no-open');
+  assert.strictEqual(cmd, 'C:/node/node.exe C:/bin.js web --port 3080 --no-open');
 });
 
 test('buildTerminalCommand quotes args containing spaces', () => {
@@ -263,7 +305,7 @@ test('buildTerminalCommand quotes args containing spaces', () => {
   );
   assert.strictEqual(
     cmd,
-    'C:/node/node.exe "C:/my bin.js" web --patch "C:/ws/.dsh/a b.patch.yml" --host 127.0.0.1 --port 3080 --no-open'
+    'C:/node/node.exe "C:/my bin.js" web --patch "C:/ws/.dsh/a b.patch.yml" --port 3080 --no-open'
   );
 });
 
