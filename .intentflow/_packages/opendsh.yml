@@ -1,7 +1,7 @@
 packageName: opendsh
 summary: |
   VS Code 扩展：在编辑器内打开 DeepSeek Harness Web UI，一键起停 dsh web 服务。
-  入口 extension.js，业务分三层 src/{manager,detect,process,webview}.js，单测 test/，零第三方依赖。
+  入口 extension.js，业务分层 src/{manager,detect,process,webview,patch}.js 与 src/launch/（五模式启动器族：integrated/window/hidden/window-keepalive/hidden-keepalive + index 分发器），单测 test/，零第三方依赖。
   薄壳启动器——不承担任何界面聚焦契约（?focus= 由 DSH 侧负责），打开方式完全由 settings 决定。
   移除 npx 兜底、启动去重、Output 诊断；
   启动方式单枚举 opendsh.launch.mode（integrated/window/hidden/window-keepalive/hidden-keepalive，
@@ -32,7 +32,7 @@ groups:
       启动参数收敛为最小稳定集（web / --patch 可选 / --host 非默认才传 / --port / --no-open），禁 dsh 自开浏览器由 opendsh 控制打开方式；
       dsh 定位 = dshPath 设置 > npm 全局真实入口（node + bin.js，Windows 绕 .cmd shim 防弹黑框，无 PATH 兜底）> POSIX 走 PATH 的 dsh 可执行脚本；
       stop 后残窗内 open 等待端口释放再启动（区分残留旧进程与外部 dsh），修手动 Stop→Open 悬置；
-      launch.mode 五模式分发（integrated/window/hidden 走终端/桌面窗口/静默 spawn、*-keepalive 走 WMI 独立存活）、
+      launch.mode 五模式经 src/launch/index 分发器按 launchMode 路由到各独立启动器（integrated 终端承载 / window 可见窗口 / hidden 静默 / *-keepalive 走 WMI 独立存活）、统一返回 {kind:'terminal'|'child'} 契约由 manager 消费，使各启动模式可独立维护零联动、
       启动超时复位（resetTerminal dispose 失败终端 / resetChild kill 僵尸 child + 清引用 + 删 pid，防毒引用死锁，下次 open 重走启动）、
       hidden-keepalive+windowsHidePatch 经 src/patch.js 幂等补丁；包含调试日志用于追踪配置读取和执行流程。
     files:
@@ -42,16 +42,28 @@ groups:
       - src/process.js
       - src/webview.js
       - src/patch.js
+      - src/launch/index.js
+      - src/launch/integrated.js
+      - src/launch/window.js
+      - src/launch/hidden.js
+      - src/launch/window-keepalive.js
+      - src/launch/hidden-keepalive.js
       - media/dsh-activity.svg
   - name: 单元测试
-    summary: node:test 覆盖 detect/process/manager/webview/patch 五个模块（含 dsh 定位优先级、端口释放等待、WMI 独立启动、
-      pid 残留停止、webview 单例创建/复用/重载/关页重建/创建失败回退、打开方式分叉、补丁定位/幂等）
+    summary: node:test 覆盖 detect/process/manager/webview/patch/srclaunch 与五模式启动器族（含 dsh 定位优先级、端口释放等待、WMI 独立启动、
+      pid 残留停止、webview 单例创建/复用/重载/关页重建/创建失败回退、打开方式分叉、补丁定位/幂等、各启动器统一契约与分发路由）
     files:
       - test/detect.test.js
       - test/process.test.js
       - test/manager.test.js
       - test/webview.test.js
       - test/patch.test.js
+      - test/launch/integrated.test.js
+      - test/launch/window.test.js
+      - test/launch/hidden.test.js
+      - test/launch/window-keepalive.test.js
+      - test/launch/hidden-keepalive.test.js
+      - test/launch/index.test.js
   - name: 运维补丁与发布辅助
     summary: 非运行时资产——DSH Windows 子进程窗口补丁脚本（幂等、可重跑）、上游 issue 草案与 .vscodeignore
       打包排除规则，便于本机修复 DSH 弹窗、发布 vsix 后维护；不入 vsix 包。

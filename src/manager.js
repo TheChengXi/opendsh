@@ -20,11 +20,10 @@
  * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal。
  * 配置读取经 readSettings：VS Code 嵌套设置键必须用点式键读（cfg.get('launch.mode')→字段 launchMode、cfg.get('experimental.windowsHidePatch')→字段 windowsHidePatch），
  *   其余单段键（host/port/dshPath/patchFile/openWith/multipleTabs）用同名 key；产出对象为扁平字段（供 detect.resolveConfig 消费）。
- * 五模式启动（单枚举 launch.mode，无优先级叠加）：integrated→createTerminal；window→spawnDshVisible；hidden→spawnDsh 静默；
- * window-keepalive→spawnStandalone(showWindow=1 弹窗独立)；hidden-keepalive→spawnStandalone(showWindow=0 静默独立)，
- *  且仅当 windowsHidePatch=true 时先 patch.isApplied 检测、未打则 createTerminal 发送 patch.buildPatchCommand 补丁命令；
- * integrated（=内置终端）模式存 terminal 引用（无 pid）：createTerminal + sendText 直接发（VS Code 自行缓冲至 shell 就绪），
- *   stop/dispose 关终端停服务，不写 pid 文件；
+ * 五模式启动（单枚举 launch.mode，无优先级叠加）经 src/launch/index 分发器按 config.launchMode 分发到对应启动器
+ * （integrated/window/hidden/window-keepalive/hidden-keepalive），各启动器返回统一 {kind:'terminal'|'child', 引用} 契约，
+ *   manager 按 kind 消费：terminal 存引用（integrated，无 pid）并注册 onDidClose 清引用，child 挂 attachStderr + 写 pid；
+ *   启动细节（补丁、showWindow、命令组装）收敛在各启动器，manager 不感知单个模式；
  *   启动超时（waitForPort 失败）时 resetTerminal（dispose 失败终端 + 置空引用）与 resetChild（杀僵尸 child + 清引用 + 删 pid），
  *   下次 open 重走启动；复用分支超时同样复位 terminal + child（防止「毒引用」永久复用等待）。
  *
@@ -47,9 +46,8 @@
  * - 启动日志写入 outputChannel，失败弹窗附 stderr 摘要
  * - stop 无 child 时提示且不抛异常
  * - dispose 静默终止 child（不弹消息），无 child 时安全返回；keepalive 模式（window-keepalive/hidden-keepalive）时不终止
- * - 五模式分发：integrated→createTerminal（存 terminal 引用，不写 pid）；window→spawnDshVisible；hidden→spawnDsh 静默；
- *   window-keepalive→spawnStandalone(showWindow=1 弹窗脱离 VS Code job)；hidden-keepalive→spawnStandalone(showWindow=0 静默)，
- *   且仅当 windowsHidePatch=true 先 patch.isApplied 检测、未打则 createTerminal 发送 patch.buildPatchCommand 命令
+ * - 五模式分发经 src/launch/index 按 launchMode 分发到对应启动器，统一返回 {kind:'terminal'|'child'} 被 manager 消费：
+ *   integrated 存 terminal 引用（不写 pid），window/hidden spawn 真实 child 写 pid，keepalive 两类 spawnStandalone 产出 { pid }
  * - 启动超时（waitForPort 返回 false）复位启动实例：dispose 失败终端 + 置空引用、kill 僵尸 child + 清引用 + 删 pid，下次 open 重走启动；复用分支超时同样复位 terminal + child
  * - 启动成功后写 pid 到 <workspace>/.dsh/opendsh.pid（integrated 模式除外）；stop 无 child 时读 pid 文件停止残留服务（经端口/httpProbe 验证防误杀），成功删文件
  * - dispose 杀掉后删 pid 文件；keepalive 独立模式不删（跨会话 stop 可用）；integrated 模式 dispose 关终端
@@ -66,6 +64,7 @@ function createManager(deps) {
   const webview = deps.webview;
   const patch = deps.patch;
   const vscode = deps.vscode;
+  const launcher = require('./launch').createLauncher({ vscode, process: proc, patch });
 
   let child = null;
   let terminal = null; // 普通 terminal 模式承载 DSH 的集成终端（无 pid，stop/dispose 关终端停服务）
@@ -316,94 +315,28 @@ function createManager(deps) {
         ' mode=' + config.launchMode
     );
     try {
-      switch (config.launchMode) {
-        case 'integrated': {
-          // 内置终端承载 DSH，无 pid：sendText 由 VS Code 缓冲至 shell 就绪，直接发送即可
-          const cmd = proc.buildTerminalCommand(resolved, {
-            host: config.host,
-            port,
-            patches,
-            cwd: workspace,
+      // 经 src/launch 分发器按 launchMode 启动：统一返回 {kind:'terminal'|'child', 引用}，manager 按 kind 消费
+      const out = await launcher.start(config.launchMode, { resolved, config, workspace, patches });
+      if (out.kind === 'terminal') {
+        terminal = out.terminal;
+        child = null;
+        const t = terminal;
+        if (typeof t.onDidClose === 'function') {
+          t.onDidClose(() => {
+            if (terminal === t) terminal = null;
           });
-          terminal = vscode.window.createTerminal('DSH');
-          terminal.show();
-          terminal.sendText(cmd);
-          const t = terminal;
-          if (typeof t.onDidClose === 'function') {
-            t.onDidClose(() => {
-              if (terminal === t) terminal = null;
-            });
-          }
-          child = null;
-          break;
         }
-        case 'window': {
-          // 桌面窗口 + 随关
-          child = proc.spawnDshVisible(resolved, {
-            host: config.host,
-            port,
-            patches,
-            cwd: workspace,
-          });
-          break;
-        }
-        case 'hidden': {
-          // 静默 + 随关
-          child = proc.spawnDsh(resolved, {
-            host: config.host,
-            port,
-            patches,
-            cwd: workspace,
-          });
-          break;
-        }
-        case 'window-keepalive': {
-          // 桌面窗口 + 独立存活：WMI 弹窗脱离 VS Code job
-          const spawned = await proc.spawnStandalone(resolved, {
-            host: config.host,
-            port,
-            patches,
-            cwd: workspace,
-            showWindow: true,
-          });
-          child = { pid: spawned.pid };
-          break;
-        }
-        case 'hidden-keepalive': {
-          // 静默 + 独立存活：先（可选）补丁，再 WMI 静默后台
-          if (config.windowsHidePatch) {
-            if (patch && typeof patch.isApplied === 'function' && !patch.isApplied({})) {
-              const cmd = patch && typeof patch.buildPatchCommand === 'function' ? patch.buildPatchCommand({}) : '';
-              if (cmd) {
-                log('sending patch command to terminal');
-                const pt = vscode.window.createTerminal('DSH patch');
-                pt.sendText(cmd);
-                pt.show();
-              }
-            } else {
-              log('patch applied or unavailable; skipping');
-            }
-          }
-          const spawned = await proc.spawnStandalone(resolved, {
-            host: config.host,
-            port,
-            patches,
-            cwd: workspace,
-            showWindow: false,
-          });
-          child = { pid: spawned.pid };
-          break;
-        }
+      } else {
+        child = out.child;
+        terminal = null;
+        attachStderr(child);
+        writePidFile(workspace, child.pid);
       }
       serverStartedAt = Date.now(); // 服务启动成功即更新标记：已存活面板在下一次 open 时被判定为旧页面并强制刷新
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       vscode.window.showErrorMessage('DSH: failed to start: ' + msg);
       return { ready: false, reload: false };
-    }
-    if (child) {
-      attachStderr(child);
-      writePidFile(workspace, child.pid);
     }
     startedKeepAlive = config.launchMode === 'window-keepalive' || config.launchMode === 'hidden-keepalive';
     const ready = await proc.waitForPort(config.host, port);
