@@ -1,11 +1,11 @@
 /**
  * @intent
- * detect.js 的 node:test 单测，覆盖设置回退、工作区解析、patch 发现、dsh 定位优先级（dshPath > PATH shim > npm 全局读 bin，落空 null）、
+ * detect.js 的 node:test 单测，覆盖设置回退、工作区解析、patch 发现、dsh 定位优先级（dshPath > npm 全局读 bin，Windows 无 PATH 兜底，落空 null）、
  * buildUrl、launchMode 枚举、windowsHidePatch 回退。
  *
  * 验收条件：node --test 全绿；launchMode 仅 5 个合法值、其余（含旧 showWindow/detached/experimentalSilentKeepAlive 遗留）回退 integrated；
  * windowsHidePatch 非 true 回退 false；openWith 合法值为 tab/simpleBrowser/systemBrowser（其余回退 tab）；
- * resolveDsh 优先 dshPath，其次 PATH 的 dsh 命令，最后 npm 全局（读 package.json bin 字段）；
+ * resolveDsh 优先 dshPath，其次 npm 全局（node + bin.js 绕 .cmd shim）；Windows 找不到 npm 全局直接 null，不 PATH 兜底；POSIX 走 PATH shim；
  * resolveNpmGlobal 按 package.json bin 字段定位真实入口，非 Windows / 无 package.json / 无 bin 返回 null。
  */
 
@@ -115,7 +115,7 @@ test('findOnPath finds dsh.cmd across PATH (win semantics)', () => {
   }
 });
 
-test('resolveDsh priority = dshPath > PATH > null (no npx fallback)', async () => {
+test('resolveDsh priority = dshPath > npm global; Windows null when npm global misses (no PATH fallback)', async () => {
   assert.deepStrictEqual(
     await detect.resolveDsh({ dshPath: 'C:/my/dsh.cmd' }, { pathEnv: '', isWin: true }),
     { command: 'C:/my/dsh.cmd', prefixArgs: [] }
@@ -124,13 +124,12 @@ test('resolveDsh priority = dshPath > PATH > null (no npx fallback)', async () =
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-resolve-'));
   try {
     fs.writeFileSync(path.join(dir, 'dsh.cmd'), '');
-    // env.APPDATA 指向不存在的目录，确保 npm 全局分支 miss，走 PATH
+    // Windows：npm 全局 miss 时直接 null，绝不 fallback 到 PATH 的 .cmd shim（会弹控制台窗口）
     const r = await detect.resolveDsh(
       { dshPath: '' },
       { isWin: true, env: { APPDATA: path.join(dir, 'no-appdata') }, nodePath: 'node.exe', pathEnv: dir }
     );
-    assert.strictEqual(r.command, path.join(dir, 'dsh.cmd'));
-    assert.deepStrictEqual(r.prefixArgs, []);
+    assert.strictEqual(r, null);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -190,7 +189,7 @@ test('resolveNpmGlobal returns null when package.json / bin / win missing', () =
   }
 });
 
-test('resolveDsh prefers PATH shim over npm global', async () => {
+test('resolveDsh prefers npm global over PATH shim', async () => {
   const d = freshDetect();
   const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-resolve-appdata-'));
   const pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-resolve-path-'));
@@ -201,19 +200,20 @@ test('resolveDsh prefers PATH shim over npm global', async () => {
     const entry = path.join(pkgDir, 'lib', 'bin.js');
     fs.mkdirSync(path.dirname(entry), { recursive: true });
     fs.writeFileSync(entry, '');
+    // npm shim 也存在于 PATH：Windows 上仍应优先 node + bin.js（绕 .cmd 弹窗）
     fs.writeFileSync(path.join(pathDir, 'dsh.cmd'), '');
     const r = await d.resolveDsh(
       { dshPath: '' },
       { isWin: true, env: { APPDATA: appData }, nodePath: 'node.exe', pathEnv: pathDir }
     );
-    assert.deepStrictEqual(r, { command: path.join(pathDir, 'dsh.cmd'), prefixArgs: [] });
+    assert.deepStrictEqual(r, { command: 'node.exe', prefixArgs: [entry] });
   } finally {
     fs.rmSync(appData, { recursive: true, force: true });
     fs.rmSync(pathDir, { recursive: true, force: true });
   }
 });
 
-test('resolveDsh falls back to npm global when PATH misses', async () => {
+test('resolveDsh uses npm global entry when PATH misses', async () => {
   const d = freshDetect();
   const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-resolve-noglob-'));
   try {

@@ -1,7 +1,8 @@
 /**
  * @intent
  * 把「自动检索」收敛为纯函数：解析设置、定位工作区、发现 MCP patch、解析 dsh 可执行、组装打开 URL。
- * dsh 定位优先级 = dshPath 设置 > PATH 的 dsh 命令（npm shim）> npm 全局真实入口（读 package.json bin 字段定位）；全部落空返回 null 快速失败，绝不进入 npx 慢路径。
+ * dsh 定位优先级 = dshPath 设置 > npm 全局真实入口（node + bin.js，Windows 绕 .cmd shim 避免经 cmd.exe 弹控制台窗口）；
+ *   Windows 找不到 npm 全局直接返回 null（绝不 .cmd shim 兜底）；POSIX 走 PATH 的 dsh 可执行脚本；全部落空返回 null 快速失败，绝不进入 npx 慢路径。
  * 本扩展是薄壳启动器：打开方式仅 openWith 三值（tab/simpleBrowser/systemBrowser），由打开入口据此分叉；
  * URL 组装只有 buildUrl（http://host:port），不承担 ?focus= 等任何界面聚焦契约。
  *
@@ -16,7 +17,7 @@
  *   launchMode 仅 5 个合法值（integrated/window/hidden/window-keepalive/hidden-keepalive），其余一律回退默认 integrated；
  *   openWith 接受 tab/simpleBrowser/systemBrowser（其余回退 tab，含旧 focus 值）
  * - resolvePatches 无 patch 目录返回 []，有则按文件名排序返回绝对路径，显式 patchFile 优先
- * - resolveDsh 优先级 = dshPath > PATH > npm 全局，全部落空返回 null（不再 npx 兜底）
+ * - resolveDsh 优先级 = dshPath > npm 全局（node + bin.js，仅 Windows）；Windows 找不到 npm 全局直接 null，不 PATH shim 兜底；POSIX 走 PATH shim；全部落空返回 null（不再 npx 兜底）
  * - resolveNpmGlobal 命中则按 package.json bin 字段返回 { command: node, prefixArgs: [真实入口] }，未命中/非 Windows 返回 null
  * - resolveNode 在 execPath 非 node（如 Code.exe）时回退 PATH/Program Files/命令名，绝不返回非 node 可执行
  * - buildUrl(host, port) 返回 http://host:port
@@ -173,11 +174,14 @@ async function resolveDsh(config, deps) {
   const isWin = typeof d.isWin === 'boolean' ? d.isWin : process.platform === 'win32';
   const pathEnv = d.pathEnv !== undefined ? d.pathEnv : (process.env && process.env.PATH) || '';
   if (cfg.dshPath) return { command: cfg.dshPath, prefixArgs: [] };
-  // 1) PATH 的 dsh 命令（npm shim，恒指向 package.json bin 声明的真实入口）
+  if (isWin) {
+    // Windows：只认 npm 全局真实入口（node + bin.js）。找不到直接 null，绝不 .cmd shim 兜底（.cmd 经 cmd.exe 会弹控制台窗口）
+    return resolveNpmGlobal(d);
+  }
+  // POSIX：PATH 的 dsh 可执行脚本（无 .cmd shim 概念）
   const found = findOnPath('dsh', pathEnv, isWin);
   if (found) return { command: found, prefixArgs: [] };
-  // 2) npm 全局真实入口（读 package.json bin 字段，绕 .cmd shim）
-  return resolveNpmGlobal(d);
+  return null;
 }
 
 function buildUrl(host, port) {

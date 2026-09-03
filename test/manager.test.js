@@ -5,7 +5,8 @@
  * 验收条件：node --test 全绿，覆盖 open 自动启动、启动去重复用 child、端口占用归属判定、stop 后残窗内 open 等待端口释放、无工作区报错、
  * resolveDsh null 快速失败、端口超时报错、webview 单例/复用 reveal/重启重载/关页重建/创建失败回退、
  * 打开方式分叉（systemBrowser/simpleBrowser/multipleTabs/tab）、channel 日志、stop 无 child 提示、
- * pid 文件读写、五模式分发（integrated 终端 / window 桌面窗口 / hidden 静默 / window-keepalive 弹窗独立 / hidden-keepalive 静默独立+可选补丁）。
+ * pid 文件读写、五模式分发（integrated 终端 / window 桌面窗口 / hidden 静默 / window-keepalive 弹窗独立 / hidden-keepalive 静默独立+可选补丁）、
+ * integrated 的 shell-ready 发送时序（sendText 在 onDidStartTerminalShell 之后）与启动超时复位（dispose 失败终端 + 下次重建）。
  * settings 测试数据用真实 VS Code 键名（'launch.mode' / 'experimental.windowsHidePatch' 点式键），
  * harness 的 cfgGet 按键直查 settings，不模拟点段拆分；键名错位时值取不到 → 回退 → 断言失败，回归敏感。
  */
@@ -658,4 +659,78 @@ test('hidden-keepalive without patch flag does not patch', async () => {
   assert.strictEqual(h.calls.terminals.length, 0);
   assert.strictEqual(h.calls.spawned.standalone, true);
   assert.strictEqual(h.calls.spawned.o.showWindow, false);
+});
+
+test('integrated resets terminal on first start timeout, then reopens', async () => {
+  let ready = false;
+  const h = makeHarness({
+    settings: { 'launch.mode': 'integrated' },
+    process: { waitForPort: async () => ready },
+  });
+  await h.manager.open();
+  assert.strictEqual(h.calls.terminals[0].disposed, true); // 超时失败 → 复位失败终端
+  assert.strictEqual(h.calls.panels.length, 0);
+
+  ready = true;
+  await h.manager.open();
+  assert.strictEqual(h.calls.terminals.length, 2); // 重建终端
+  assert.strictEqual(h.calls.terminals[1].sent.length, 1);
+  assert.strictEqual(h.calls.panels.length, 1);
+});
+
+test('integrated reusing a stuck terminal times out and resets it', async () => {
+  let ready = false;
+  const h = makeHarness({
+    settings: { 'launch.mode': 'integrated' },
+    process: { isPortInUse: async () => false, waitForPort: async () => ready },
+  });
+  // 第一次成功：terminal 存活，服务「已起」
+  ready = true;
+  await h.manager.open();
+  assert.strictEqual(h.calls.terminals.length, 1);
+  assert.strictEqual(h.calls.panels.length, 1);
+
+  // 第二次：端口未监听（模拟服务已停）但 terminal 引用还在 → 复用分支 → 超时 → 复位
+  ready = false;
+  await h.manager.open();
+  assert.strictEqual(h.calls.terminals[0].disposed, true);
+  assert.ok(h.calls.messages.some((x) => x.kind === 'error'));
+});
+
+test('hidden resets child on first start timeout, then respawns', async () => {
+  let ready = false;
+  const h = makeHarness({
+    settings: { 'launch.mode': 'hidden' },
+    process: { waitForPort: async () => ready },
+  });
+  await h.manager.open();
+  assert.strictEqual(h.calls.spawnCount, 1);
+  assert.strictEqual(h.manager.getChild(), null); // 超时失败 → 清 child 引用
+  assert.strictEqual(h.calls.killed, true); // 失败 child 被 kill
+  assert.strictEqual(h.calls.panels.length, 0);
+
+  ready = true;
+  await h.manager.open();
+  assert.strictEqual(h.calls.spawnCount, 2); // 下次能重新 spawn，而非复用死 child
+  assert.strictEqual(h.calls.panels.length, 1);
+});
+
+test('hidden reusing a stuck child times out and resets it', async () => {
+  let ready = false;
+  const h = makeHarness({
+    settings: { 'launch.mode': 'hidden' },
+    process: { isPortInUse: async () => false, waitForPort: async () => ready },
+  });
+  // 第一次成功：child 存活
+  ready = true;
+  await h.manager.open();
+  assert.strictEqual(h.calls.spawnCount, 1);
+  assert.strictEqual(h.calls.panels.length, 1);
+
+  // 第二次：端口未监听（模拟服务已停）但 child 引用还在 → 复用分支 → 超时 → 复位
+  ready = false;
+  await h.manager.open();
+  assert.strictEqual(h.calls.killed, true); // 复用超时的 child 被 kill
+  assert.strictEqual(h.manager.getChild(), null);
+  assert.ok(h.calls.messages.some((x) => x.kind === 'error'));
 });

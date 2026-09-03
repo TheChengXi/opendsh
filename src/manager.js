@@ -23,7 +23,10 @@
  * 五模式启动（单枚举 launch.mode，无优先级叠加）：integrated→createTerminal；window→spawnDshVisible；hidden→spawnDsh 静默；
  * window-keepalive→spawnStandalone(showWindow=1 弹窗独立)；hidden-keepalive→spawnStandalone(showWindow=0 静默独立)，
  *  且仅当 windowsHidePatch=true 时先 patch.isApplied 检测、未打则 createTerminal 发送 patch.buildPatchCommand 补丁命令；
- * integrated（=内置终端）模式存 terminal 引用（无 pid），stop/dispose 关终端停服务，不写 pid 文件。
+ * integrated（=内置终端）模式存 terminal 引用（无 pid）：createTerminal + sendText 直接发（VS Code 自行缓冲至 shell 就绪），
+ *   stop/dispose 关终端停服务，不写 pid 文件；
+ *   启动超时（waitForPort 失败）时 resetTerminal（dispose 失败终端 + 置空引用）与 resetChild（杀僵尸 child + 清引用 + 删 pid），
+ *   下次 open 重走启动；复用分支超时同样复位 terminal + child（防止「毒引用」永久复用等待）。
  *
  * 验收条件：
  * - open 端口未监听时 spawn → 等待端口就绪 → openWebview；已监听时跳过 spawn 直接 openWebview
@@ -47,6 +50,7 @@
  * - 五模式分发：integrated→createTerminal（存 terminal 引用，不写 pid）；window→spawnDshVisible；hidden→spawnDsh 静默；
  *   window-keepalive→spawnStandalone(showWindow=1 弹窗脱离 VS Code job)；hidden-keepalive→spawnStandalone(showWindow=0 静默)，
  *   且仅当 windowsHidePatch=true 先 patch.isApplied 检测、未打则 createTerminal 发送 patch.buildPatchCommand 命令
+ * - 启动超时（waitForPort 返回 false）复位启动实例：dispose 失败终端 + 置空引用、kill 僵尸 child + 清引用 + 删 pid，下次 open 重走启动；复用分支超时同样复位 terminal + child
  * - 启动成功后写 pid 到 <workspace>/.dsh/opendsh.pid（integrated 模式除外）；stop 无 child 时读 pid 文件停止残留服务（经端口/httpProbe 验证防误杀），成功删文件
  * - dispose 杀掉后删 pid 文件；keepalive 独立模式不删（跨会话 stop 可用）；integrated 模式 dispose 关终端
  */
@@ -128,6 +132,26 @@ function createManager(deps) {
       stderrTail = (stderrTail + chunk).slice(-2048);
       if (channel && typeof channel.append === 'function') channel.append(chunk);
     });
+  }
+
+  // 关闭失败终端并清引用：命令下发后端口未就绪（waitForPort 超时）时调用，下次 open 重走 integrated 启动。
+  function resetTerminal() {
+    if (!terminal) return;
+    const t = terminal;
+    terminal = null;
+    t.dispose();
+  }
+
+  // 关闭失败/卡死的 child 并清引用：端口未就绪（waitForPort 超时）时调用，杀掉僵尸进程、删 pid，
+  // 下次 open 重走启动，避免「毒 child 引用」导致永远复用等待。killDsh 对已死进程 taskkill 失败，无害。
+  function resetChild() {
+    if (!child) return;
+    const c = child;
+    child = null;
+    if (c && !c.killed) {
+      proc.killDsh(c);
+    }
+    removePidFile(detect.resolveWorkspace(vscode.workspace.workspaceFolders));
   }
 
   function readSettings() {
@@ -260,6 +284,8 @@ function createManager(deps) {
       const ready = await proc.waitForPort(config.host, port);
       if (!ready) {
         const tail = stderrTail.trim();
+        resetTerminal(); // 复用中的 terminal 卡死复位
+        resetChild(); // 复用中的 child 卡死复位（杀僵尸 + 清引用，下次重走启动）
         vscode.window.showErrorMessage(
           'DSH: server did not start (port not listening).' + (tail ? '\n' + tail.slice(-300) : '')
         );
@@ -292,7 +318,7 @@ function createManager(deps) {
     try {
       switch (config.launchMode) {
         case 'integrated': {
-          // 内置终端承载 DSH，无 pid
+          // 内置终端承载 DSH，无 pid：sendText 由 VS Code 缓冲至 shell 就绪，直接发送即可
           const cmd = proc.buildTerminalCommand(resolved, {
             host: config.host,
             port,
@@ -300,8 +326,8 @@ function createManager(deps) {
             cwd: workspace,
           });
           terminal = vscode.window.createTerminal('DSH');
-          terminal.sendText(cmd);
           terminal.show();
+          terminal.sendText(cmd);
           const t = terminal;
           if (typeof t.onDidClose === 'function') {
             t.onDidClose(() => {
@@ -383,6 +409,8 @@ function createManager(deps) {
     const ready = await proc.waitForPort(config.host, port);
     if (!ready) {
       const tail = stderrTail.trim();
+      resetTerminal(); // integrated 启动失败：失败终端复位，下次重开
+      resetChild(); // child 启动失败：杀僵尸 + 清引用，下次重走启动
       vscode.window.showErrorMessage(
         'DSH: server did not start (port not listening).' + (tail ? '\n' + tail.slice(-300) : '')
       );
