@@ -1,9 +1,9 @@
 /**
  * @intent
- * 五模式分发器单测：断言 createLauncher(deps) 按 launchMode 路由到对应启动器，未知 mode 抛错。
+ * 四模式分发器单测：断言 createLauncher(deps) 按 launchMode 路由到对应启动器，未知 mode 抛错。
  * 依赖全注入（vscode/process/patch），验证分发契约而非单一模式细节（细节在各启动器单测覆盖）。
  *
- * 验收条件：node --test test/launch/ 全绿——integrated 返回 {kind:'terminal'}、其余四模式返回 {kind:'child'}、
+ * 验收条件：node --test test/launch/ 全绿——integrated 返回 {kind:'terminal'}、其余三模式返回 {kind:'child'}、
  * 未知 mode 抛 Error。
  */
 'use strict';
@@ -36,10 +36,6 @@ function makeDeps() {
         calls.spawned = 'visible';
         return { pid: 8 };
       },
-      spawnDsh: () => {
-        calls.spawned = 'hidden';
-        return { pid: 1 };
-      },
       spawnStandalone: async (r, o) => {
         calls.standalone = o;
         return { pid: 9 };
@@ -71,17 +67,13 @@ test('launcher routes integrated to terminal descriptor', async () => {
   assert.strictEqual(calls.spawned, null);
 });
 
-test('launcher routes window/hidden/keepalive modes to child records', async () => {
+test('launcher routes window/keepalive modes to child records', async () => {
   const { deps, calls } = makeDeps();
   const launcher = createLauncher(deps);
 
   const w = await launcher.start('window', ctx());
   assert.strictEqual(w.kind, 'child');
   assert.strictEqual(w.child.pid, 8);
-
-  const h = await launcher.start('hidden', ctx());
-  assert.strictEqual(h.kind, 'child');
-  assert.strictEqual(h.child.pid, 1);
 
   const wk = await launcher.start('window-keepalive', ctx());
   assert.strictEqual(wk.kind, 'child');

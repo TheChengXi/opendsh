@@ -7,14 +7,14 @@
  * URL 组装只有 buildUrl（http://host:port），不承担 ?focus= 等任何界面聚焦契约。
  *
  * 边界：任何检索失败都不抛异常——无工作区返回 null、无 patch 目录返回空数组、非法/缺失端口回退 3080、
- * 找不到 dsh 返回 null 由 manager 报错；launchMode 为启动模式枚举（integrated/window/hidden/window-keepalive/hidden-keepalive，非法一律回退默认 integrated），windowsHidePatch 非 true 一律回退 false（实验版补丁开关）；
+ * 找不到 dsh 返回 null 由 manager 报错；launchMode 为启动模式枚举（integrated/window/window-keepalive/hidden-keepalive，非法一律回退默认 integrated），windowsHidePatch 非 true 一律回退 false（实验版补丁开关）；
  * resolveNpmGlobal 仅 Windows APPDATA\npm 定位 npm 全局根并读 @deepseek-ai/dsh/package.json 的 bin 字段解析真实入口（不再硬编码 lib/bin.js；POSIX 由 PATH 的 dsh 可执行脚本覆盖，返回 null）；
  * node 路径经 resolveNode 探测——execPath 本身是 node 才直接复用，否则回退 PATH/常见安装位/命令名（VS Code 扩展 host 的 execPath 是 Code.exe，不可作 node）；
  * 代码内无 URL 字面量，地址由 buildUrl 组装。
  *
  * 验收条件：
  * - resolveConfig 对缺失/非法 host/port 回退默认 127.0.0.1/3080，multipleTabs/windowsHidePatch 非 true 一律回退 false，
- *   launchMode 仅 5 个合法值（integrated/window/hidden/window-keepalive/hidden-keepalive），其余一律回退默认 integrated；
+ *   launchMode 仅 4 个合法值（integrated/window/window-keepalive/hidden-keepalive），其余一律回退默认 integrated；
  *   openWith 接受 tab/simpleBrowser/systemBrowser（其余回退 tab，含旧 focus 值）
  * - resolvePatches 无 patch 目录返回 []，有则按文件名排序返回绝对路径，显式 patchFile 优先
  * - resolveDsh 优先级 = dshPath > npm 全局（node + bin.js，仅 Windows）；Windows 找不到 npm 全局直接 null，不 PATH shim 兜底；POSIX 走 PATH shim；全部落空返回 null（不再 npx 兜底）
@@ -30,7 +30,7 @@ const path = require('node:path');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3080;
-const LAUNCH_MODES = ['integrated', 'window', 'hidden', 'window-keepalive', 'hidden-keepalive'];
+const LAUNCH_MODES = ['integrated', 'window', 'window-keepalive', 'hidden-keepalive'];
 
 function resolveConfig(settings) {
   const s = settings || {};
@@ -39,7 +39,8 @@ function resolveConfig(settings) {
   const validPort = Number.isInteger(port) && port >= 1 && port <= 65535 ? port : DEFAULT_PORT;
   const dshPath = typeof s.dshPath === 'string' ? s.dshPath.trim() : '';
   const patchFile = typeof s.patchFile === 'string' ? s.patchFile.trim() : '';
-  // 启动模式枚举（载体 × 存活的有效组合）：仅 5 个合法值，其余（含旧 showWindow/detached/experimentalSilentKeepAlive 遗留值）回退默认 integrated
+  // 启动模式枚举（载体 × 存活的有效组合）：仅 4 个合法值，其余（含旧 hidden/experimentalSilentKeepAlive 等遗留值，及旧 showWindow/detached 值）一律回退默认 integrated。
+  //   hidden 静默非 keepalive 模式已下线——其登录方式实际应用效果与 hidden-keepalive 同类 bug，非合格可用模式。
   const launchMode = LAUNCH_MODES.includes(s.launchMode) ? s.launchMode : 'integrated';
   const windowsHidePatch = s.windowsHidePatch === true;
   // webview 内访问 DSH 用的主机名：默认同 host；可单独设为别名（如 dsh.local）绕开 VS Code 对 localhost 的 service-worker 拦截，

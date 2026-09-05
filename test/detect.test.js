@@ -318,11 +318,13 @@ test('resolveNpmGlobal uses resolved node path not execPath', () => {
 });
 
 test('resolveConfig resolves launchMode enum and windowsHidePatch', () => {
-  for (const m of ['integrated', 'window', 'hidden', 'window-keepalive', 'hidden-keepalive']) {
+  for (const m of ['integrated', 'window', 'window-keepalive', 'hidden-keepalive']) {
     assert.strictEqual(detect.resolveConfig({ launchMode: m }).launchMode, m);
   }
   assert.strictEqual(detect.resolveConfig({}).launchMode, 'integrated');
   assert.strictEqual(detect.resolveConfig({ launchMode: 'bogus' }).launchMode, 'integrated');
+  // hidden 静默非 keepalive 模式已下线：非法一律回退默认 integrated
+  assert.strictEqual(detect.resolveConfig({ launchMode: 'hidden' }).launchMode, 'integrated');
   // 旧 showWindow 值（terminal/output）与旧键遗留一律回退默认 integrated
   assert.strictEqual(detect.resolveConfig({ launchMode: 'terminal' }).launchMode, 'integrated');
   assert.strictEqual(detect.resolveConfig({ launchMode: 'output' }).launchMode, 'integrated');

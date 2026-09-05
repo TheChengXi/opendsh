@@ -99,7 +99,6 @@
           "enum": [
             "integrated",
             "window",
-            "hidden",
             "window-keepalive",
             "hidden-keepalive"
           ],
@@ -107,7 +106,6 @@
           "markdownEnumDescriptions": [
             "在 VS Code **集成终端**中运行 DSH，随 VS Code 关闭而停止（默认）。Runs DSH in a VS Code integrated terminal; stops when VS Code closes (default).",
             "在**桌面控制台窗口**中运行 DSH，随 VS Code 关闭而停止。Runs DSH in a desktop console window; stops when VS Code closes.",
-            "**静默**启动（无终端/无窗口），日志进 Output 面板 'DSH' 通道，随 VS Code 关闭而停止。Starts silently (no terminal / no window) with logs in the Output panel 'DSH' channel; stops when VS Code closes.",
             "在**桌面控制台窗口**中运行 DSH，VS Code 关闭后**继续运行**（关窗或 Stop 才停）。Runs DSH in a desktop console window; keeps running after VS Code closes (close the window or Stop to stop).",
             "**静默**启动，VS Code 关闭后**继续运行**；可配合 `opendsh.experimental.windowsHidePatch` 抑制工具调用闪窗。Starts silently; keeps running after VS Code closes; can be paired with `opendsh.experimental.windowsHidePatch` to stop tool-call windows from flashing."
           ],

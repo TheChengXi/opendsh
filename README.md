@@ -52,10 +52,9 @@
 - `opendsh.dshPath`（默认 `""`）—— `dsh` 的路径；留空表示自动（先 npm 全局安装，后 PATH）。
 - `opendsh.patchFile`（默认 `""`）—— MCP 补丁文件；留空表示自动发现工作区根目录下的
   `.dsh/*.patch.yml`。
-- `opendsh.launch.mode`（默认 `"integrated"`）—— 启动方式（输出载体 × 是否随 VS Code 存活）五选一：
+- `opendsh.launch.mode`（默认 `"integrated"`）—— 启动方式（输出载体 × 是否随 VS Code 存活）四选一：
   - `integrated`：在 VS Code 集成终端运行，随 VS Code 关闭而停止（默认）。
   - `window`：在桌面控制台窗口运行，随 VS Code 关闭而停止。
-  - `hidden`：静默启动（日志在 Output 面板 DSH 频道），随 VS Code 关闭而停止。
   - `window-keepalive`：在桌面控制台窗口运行，VS Code 关闭后**继续运行**（关窗或 Stop 才停）。
   - `hidden-keepalive`：静默启动，VS Code 关闭后继续运行。
   启动模式在启动那一刻固定：**切换后需先 `Stop DSH`（或关窗/关端）再重新 `Open DSH` 才生效**。
@@ -140,7 +139,6 @@ and can start / stop the `dsh web` server for the current workspace.
   survives VS Code), one of:
   - `integrated`: in a VS Code integrated terminal; stops when VS Code closes (default).
   - `window`: in a desktop console window; stops when VS Code closes.
-  - `hidden`: silent, logs in the Output panel "DSH" channel; stops when VS Code closes.
   - `window-keepalive`: in a desktop console window; **keeps running** after VS Code closes.
   - `hidden-keepalive`: silent; keeps running after VS Code closes.
   The launch mode is fixed at start time: after changing it, `Stop DSH` first, then `Open DSH`.
@@ -175,7 +173,7 @@ To open from a terminal: `start "" "vscode://TheChengXi.opendsh/open"` (Windows)
 
 ### 问题 / Issue
 
-在 Windows 上以静默模式（`launch.mode = "hidden"` 或 `"hidden-keepalive"`）启动 `dsh web` 后，与 agent 对话时
+在 Windows 上以静默模式（`launch.mode = "hidden-keepalive"`）启动 `dsh web` 后，与 agent 对话时
 **每次调用 shell / subprocess 工具，任务栏都会闪现一个 node 控制台窗口**（一闪而过，快到来不及看清）。
 反复调用工具时反复弹窗。
 
@@ -205,7 +203,7 @@ node scripts/patch-dsh-windows-hide.mjs --check   # 只检查是否已打过
 
 ### Status
 
-On Windows, when `dsh web` runs **silently** (`launch.mode = "hidden"` or `"hidden-keepalive"`), every
+On Windows, when `dsh web` runs **silently** (`launch.mode = "hidden-keepalive"`), every
 shell / subprocess tool call flashes a `node` console window in the taskbar while you chat with an agent.
 The root cause is **not this extension**: DSH wraps each confined command as
 `[node, .../dsh-sandbox-windows-acl/runner.js, <payload>]` and spawns it via `dsh-subprocess-local`'s

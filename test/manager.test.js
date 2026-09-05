@@ -5,7 +5,7 @@
  * 验收条件：node --test 全绿，覆盖 open 自动启动、启动去重复用 child、端口占用归属判定、stop 后残窗内 open 等待端口释放、无工作区报错、
  * resolveDsh null 快速失败、端口超时报错、webview 单例/复用 reveal/重启重载/关页重建/创建失败回退、
  * 打开方式分叉（systemBrowser/simpleBrowser/multipleTabs/tab）、channel 日志、stop 无 child 提示、
- * pid 文件读写、五模式分发（integrated 终端 / window 桌面窗口 / hidden 静默 / window-keepalive 弹窗独立 / hidden-keepalive 静默独立+可选补丁）、
+ * pid 文件读写、四模式分发（integrated 终端 / window 桌面窗口 / window-keepalive 弹窗独立 / hidden-keepalive 静默独立+可选补丁）、
  * integrated 的 shell-ready 发送时序（sendText 在 onDidStartTerminalShell 之后）与启动超时复位（dispose 失败终端 + 下次重建）。
  * settings 测试数据用真实 VS Code 键名（'launch.mode' / 'experimental.windowsHidePatch' 点式键），
  * harness 的 cfgGet 按键直查 settings，不模拟点段拆分；键名错位时值取不到 → 回退 → 断言失败，回归敏感。
@@ -101,7 +101,7 @@ function makeHarness(opts) {
     ...(opts.patch || {}),
   };
 
-  const baseSettings = { host: '127.0.0.1', webviewHost: '', port: 3080, dshPath: '', patchFile: '', 'launch.mode': 'hidden', 'experimental.windowsHidePatch': false, openWith: 'tab' };
+  const baseSettings = { host: '127.0.0.1', webviewHost: '', port: 3080, dshPath: '', patchFile: '', 'launch.mode': 'integrated', 'experimental.windowsHidePatch': false, openWith: 'tab' };
   const cfgGet = (key) =>
     opts.settings && opts.settings[key] !== undefined ? opts.settings[key] : baseSettings[key];
 
@@ -198,7 +198,7 @@ function makeHarness(opts) {
 }
 
 test('open auto-starts when port free', async () => {
-  const h = makeHarness();
+  const h = makeHarness({ settings: { 'launch.mode': 'window' } });
   await h.manager.open();
   assert.ok(h.calls.spawned);
   assert.strictEqual(h.calls.spawned.o.cwd, '/ws');
@@ -253,6 +253,7 @@ test('open shows error when port free and no workspace', async () => {
 
 test('open shows error when server fails to start (port timeout)', async () => {
   const h = makeHarness({
+    settings: { 'launch.mode': 'window' },
     process: {
       isPortInUse: async () => false,
       waitForPort: async () => false,
@@ -303,7 +304,7 @@ test('stop with no child shows info and does not kill', async () => {
 });
 
 test('stop kills tracked child then clears it', async () => {
-  const h = makeHarness();
+  const h = makeHarness({ settings: { 'launch.mode': 'window' } });
   await h.manager.open();
   await h.manager.stop();
   assert.strictEqual(h.calls.killed, true);
@@ -313,6 +314,7 @@ test('stop kills tracked child then clears it', async () => {
 test('open after stop waits for port release before respawning', async () => {
   let releaseCalled = 0;
   const h = makeHarness({
+    settings: { 'launch.mode': 'window' },
     process: {
       waitForPortRelease: async () => {
         releaseCalled++;
@@ -332,6 +334,7 @@ test('open after stop waits for port release before respawning', async () => {
 
 test('open after stop reports error when port not released in time', async () => {
   const h = makeHarness({
+    settings: { 'launch.mode': 'window' },
     process: {
       waitForPortRelease: async () => false, // 端口一直未释放
     },
@@ -361,7 +364,7 @@ test('open after stop with zero residual window skips release wait', async () =>
 });
 
 test('open reuses existing child instead of duplicate spawn', async () => {
-  const h = makeHarness();
+  const h = makeHarness({ settings: { 'launch.mode': 'window' } });
   await h.manager.open(); // first spawn
   assert.strictEqual(h.calls.spawnCount, 1);
   await h.manager.open(); // second must reuse, not spawn
@@ -375,7 +378,7 @@ test('open reuses existing child instead of duplicate spawn', async () => {
 
 test('open force-reloads a live panel created before the last server start', async () => {
   const proc = { isPortInUse: async () => false }; // 可变引用：第一次走 spawn，之后模拟端口已监听
-  const h = makeHarness({ process: proc });
+  const h = makeHarness({ settings: { 'launch.mode': 'window' }, process: proc });
   await h.manager.open(); // spawn#1 → 创建面板
   assert.strictEqual(h.calls.spawnCount, 1);
   const panel = h.calls.panels[0];
@@ -434,7 +437,7 @@ test('open writes startup logs to output channel', async () => {
 });
 
 test('dispose kills tracked child silently and clears it', async () => {
-  const h = makeHarness();
+  const h = makeHarness({ settings: { 'launch.mode': 'window' } });
   await h.manager.open();
   assert.strictEqual(h.calls.spawnCount, 1);
   await h.manager.dispose();
@@ -463,11 +466,11 @@ test('dispose does not kill child in window-keepalive mode', async () => {
 test('open writes pid file after successful spawn', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opendsh-pid-'));
   try {
-    const h = makeHarness({ folders: [{ uri: { fsPath: dir } }] });
+    const h = makeHarness({ settings: { 'launch.mode': 'window' }, folders: [{ uri: { fsPath: dir } }] });
     await h.manager.open();
     const pidFile = path.join(dir, '.dsh', 'opendsh.pid');
     assert.ok(fs.existsSync(pidFile));
-    assert.strictEqual(Number(fs.readFileSync(pidFile, 'utf8').trim()), 1); // fake child pid=1
+    assert.strictEqual(Number(fs.readFileSync(pidFile, 'utf8').trim()), 8); // window fake child pid=8
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -526,7 +529,7 @@ test('stop does not kill pid when port is foreign program', async () => {
 test('dispose removes pid file when killing', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opendsh-dispose-'));
   try {
-    const h = makeHarness({ folders: [{ uri: { fsPath: dir } }] });
+    const h = makeHarness({ settings: { 'launch.mode': 'window' }, folders: [{ uri: { fsPath: dir } }] });
     await h.manager.open();
     assert.ok(fs.existsSync(path.join(dir, '.dsh', 'opendsh.pid')));
     await h.manager.dispose();
@@ -550,7 +553,7 @@ test('open window-keepalive uses spawnStandalone and stop kills pseudo child', a
 });
 
 test('open recreates panel after tab dispose and keeps server', async () => {
-  const h = makeHarness();
+  const h = makeHarness({ settings: { 'launch.mode': 'window' } });
   await h.manager.open();
   assert.strictEqual(h.calls.panels.length, 1);
   h.calls.panels[0]._dispose(); // 模拟关闭标签页：仅清引用
@@ -560,7 +563,7 @@ test('open recreates panel after tab dispose and keeps server', async () => {
 });
 
 test('open throttles rapid re-clicks within debounce window', async () => {
-  const h = makeHarness({ debounceMs: 300 });
+  const h = makeHarness({ debounceMs: 300, settings: { 'launch.mode': 'window' } });
   await h.manager.open();
   await h.manager.open(); // 节流窗口内第二次触发被忽略
   assert.strictEqual(h.calls.spawnCount, 1);
@@ -568,7 +571,7 @@ test('open throttles rapid re-clicks within debounce window', async () => {
 });
 
 test('open creates separate tabs when multipleTabs is set', async () => {
-  const h = makeHarness({ settings: { multipleTabs: true } });
+  const h = makeHarness({ settings: { multipleTabs: true, 'launch.mode': 'window' } });
   await h.manager.open();
   await h.manager.open();
   // 每次 open 新建独立面板（共享同一服务，不重复 spawn）
@@ -644,14 +647,6 @@ test('window mode spawns visible desktop window via spawnDshVisible', async () =
   assert.strictEqual(h.calls.spawnCount, 1);
 });
 
-test('hidden mode spawns silently via spawnDsh', async () => {
-  const h = makeHarness({ settings: { 'launch.mode': 'hidden' } });
-  await h.manager.open();
-  assert.ok(h.calls.spawned);
-  assert.strictEqual(h.calls.spawned.visible, undefined);
-  assert.strictEqual(h.calls.spawnCount, 1);
-});
-
 test('hidden-keepalive without patch flag does not patch', async () => {
   const h = makeHarness({ settings: { 'launch.mode': 'hidden-keepalive' }, patchApplied: false });
   await h.manager.open();
@@ -697,10 +692,10 @@ test('integrated reusing a stuck terminal times out and resets it', async () => 
   assert.ok(h.calls.messages.some((x) => x.kind === 'error'));
 });
 
-test('hidden resets child on first start timeout, then respawns', async () => {
+test('window resets child on first start timeout, then respawns', async () => {
   let ready = false;
   const h = makeHarness({
-    settings: { 'launch.mode': 'hidden' },
+    settings: { 'launch.mode': 'window' },
     process: { waitForPort: async () => ready },
   });
   await h.manager.open();
@@ -715,10 +710,10 @@ test('hidden resets child on first start timeout, then respawns', async () => {
   assert.strictEqual(h.calls.panels.length, 1);
 });
 
-test('hidden reusing a stuck child times out and resets it', async () => {
+test('window reusing a stuck child times out and resets it', async () => {
   let ready = false;
   const h = makeHarness({
-    settings: { 'launch.mode': 'hidden' },
+    settings: { 'launch.mode': 'window' },
     process: { isPortInUse: async () => false, waitForPort: async () => ready },
   });
   // 第一次成功：child 存活

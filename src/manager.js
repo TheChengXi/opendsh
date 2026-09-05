@@ -20,8 +20,8 @@
  * systemBrowser/simpleBrowser/multipleTabs 方式不维护单例面板引用，无单标签页语义；simpleBrowser 抛错回退 openExternal。
  * 配置读取经 readSettings：VS Code 嵌套设置键必须用点式键读（cfg.get('launch.mode')→字段 launchMode、cfg.get('experimental.windowsHidePatch')→字段 windowsHidePatch），
  *   其余单段键（host/port/dshPath/patchFile/openWith/multipleTabs）用同名 key；产出对象为扁平字段（供 detect.resolveConfig 消费）。
- * 五模式启动（单枚举 launch.mode，无优先级叠加）经 src/launch/index 分发器按 config.launchMode 分发到对应启动器
- * （integrated/window/hidden/window-keepalive/hidden-keepalive），各启动器返回统一 {kind:'terminal'|'child', 引用} 契约，
+ * 多模式启动（单枚举 launch.mode，无优先级叠加）经 src/launch/index 分发器按 config.launchMode 分发到对应启动器
+ * （integrated/window/window-keepalive/hidden-keepalive；hidden 静默非 keepalive 已下线），各启动器返回统一 {kind:'terminal'|'child', 引用} 契约，
  *   manager 按 kind 消费：terminal 存引用（integrated，无 pid）并注册 onDidClose 清引用，child 挂 attachStderr + 写 pid；
  *   启动细节（补丁、showWindow、命令组装）收敛在各启动器，manager 不感知单个模式；
  *   启动超时（waitForPort 失败）时 resetTerminal（dispose 失败终端 + 置空引用）与 resetChild（杀僵尸 child + 清引用 + 删 pid），
@@ -46,8 +46,8 @@
  * - 启动日志写入 outputChannel，失败弹窗附 stderr 摘要
  * - stop 无 child 时提示且不抛异常
  * - dispose 静默终止 child（不弹消息），无 child 时安全返回；keepalive 模式（window-keepalive/hidden-keepalive）时不终止
- * - 五模式分发经 src/launch/index 按 launchMode 分发到对应启动器，统一返回 {kind:'terminal'|'child'} 被 manager 消费：
- *   integrated 存 terminal 引用（不写 pid），window/hidden spawn 真实 child 写 pid，keepalive 两类 spawnStandalone 产出 { pid }
+ * - 多模式分发经 src/launch/index 按 launchMode 分发到对应启动器，统一返回 {kind:'terminal'|'child'} 被 manager 消费：
+ *   integrated 存 terminal 引用（不写 pid），window spawn 真实 child 写 pid，keepalive 两类 spawnStandalone 产出 { pid }
  * - 启动超时（waitForPort 返回 false）复位启动实例：dispose 失败终端 + 置空引用、kill 僵尸 child + 清引用 + 删 pid，下次 open 重走启动；复用分支超时同样复位 terminal + child
  * - 启动成功后写 pid 到 <workspace>/.dsh/opendsh.pid（integrated 模式除外）；stop 无 child 时读 pid 文件停止残留服务（经端口/httpProbe 验证防误杀），成功删文件
  * - dispose 杀掉后删 pid 文件；keepalive 独立模式不删（跨会话 stop 可用）；integrated 模式 dispose 关终端

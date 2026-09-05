@@ -39,3 +39,20 @@
 ## 7. 结论
 - **当前状态**：可发布。全量 `node --test` 多次循环均 116 pass / 0 fail，`manager.test.js` 行为锁未破坏，`src/launch/` 单测全绿。
 - **建议下一步**：无阻塞。剩余事项均入 `later-on.md` 长期备忘；`opendsh.yml` 模块现状已在本报告同步更新。
+
+## 8. 后续变更：hidden 模式下线
+**决策**：删除 `hidden` 启动模式（静默非 keepalive）。原因：其登录方式实际应用效果会产生与 `hidden-keepalive` 同类的 bug，不是合格可用的登录模式。启动模式枚举由五值收敛为四值：`integrated / window / window-keepalive / hidden-keepalive`。
+
+**改动范围**：
+- 删除 `src/launch/hidden.js` 与 `test/launch/hidden.test.js`
+- `src/launch/index.js` 注册表与注释收敛为四模式；`src/detect.js` `LAUNCH_MODES` 去 `'hidden'`（并保留说明注掉）；`src/manager.js` 注释同步（启动逻辑经 index 分发不感知 hidden，无代码改动）
+- 测试联动：`test/launch/index.test.js` 去 hidden 路由断言；`test/detect.test.js` 枚举去 hidden 并加「hidden 回退 integrated」新断言锁定回退行为
+
+**行为锁调整**：
+- `manager.test.js` `baseSettings` 默认 `launch.mode` 由 `'hidden'` 改为 `'integrated'`（与 detect 兜底默认一致，语义自洽）
+- 受默认值牵连的 13 个 child 语义用例（open 自动启动 / stop 杀 child / dispose 杀 child / 复用 / 节流 / multipleTabs / pid 文件等）显式改用 `'window'`（剩余的非 keepalive child 载体），其中 pid 文件断言值 hidden 的 pid=1 改 window 的 pid=8
+- 删除「hidden spawns silently via spawnDsh」用例（`spawnDsh` 静默非 keepalive 无承载者）；原「hidden resets child」两个用例改用 `'window'`
+
+**验证**：全量 `node --test` 114 pass / 0 fail（较关账 116 净减 2，即删除的两个 hidden 用例），行为锁其余断言全绿。
+
+**副作用提示**：此后 `launch.mode='hidden'` 被判非法回退默认 `integrated`；detect 枚举（`LAUNCH_MODES`）与 `src/launch/index.js` 注册表仍存在两处同步联动点（新增/改名模式需同改，对应 later-on L03）。
